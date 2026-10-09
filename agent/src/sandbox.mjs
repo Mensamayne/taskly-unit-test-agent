@@ -27,10 +27,7 @@ export async function runNode({ root, side, args, config, timeoutMs }) {
       '--memory', '2g', '--cpus', '2', '--pids-limit', '512',
       ...user,
       '-e', 'CI=true', '-e', 'TZ=UTC', '-e', 'NO_COLOR=1', '-e', 'HOME=/tmp',
-      '-v', `${root}:${root}`,
-      // Dependencies that live outside the repository (linked worktrees, pnpm stores), read-only.
-      ...config.sandboxMounts.flatMap((dir) => ['-v', `${dir}:${dir}:ro`]),
-      '-w', `${root}/${side}`,
+      '-v', `${root}:${root}`, '-w', `${root}/${side}`,
       config.sandboxImage, 'node', ...args,
     ];
     // The docker client itself needs no secrets either.

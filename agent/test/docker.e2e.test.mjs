@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { cpSync, existsSync, lstatSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { after, before, describe, it } from 'node:test';
@@ -53,7 +53,6 @@ function uta(args, env = {}) {
   const childEnv = {
     ...process.env,
     TEST_SANDBOX: 'docker',
-    UTA_SANDBOX_MOUNTS: `${join(REPO, 'backend', 'node_modules')},${join(REPO, 'frontend', 'node_modules')}`,
     ...env,
   };
   delete childEnv.CI;
@@ -72,7 +71,10 @@ before(() => {
   if (!dockerReady) return;
   assert.equal(spawnSync('docker', ['pull', '-q', loadConfig({}).sandboxImage], { stdio: 'ignore' }).status, 0, 'sandbox image pulls');
   git(['worktree', 'add', '--detach', WT, 'HEAD'], REPO);
-  for (const side of ['backend', 'frontend']) symlinkSync(join(REPO, side, 'node_modules'), join(WT, side, 'node_modules'));
+  // Real copies: the container sees only the worktree, and Vite writes into node_modules.
+  for (const side of ['backend', 'frontend']) {
+    assert.equal(spawnSync('cp', ['-a', join(REPO, side, 'node_modules'), join(WT, side, 'node_modules')]).status, 0);
+  }
   cpSync(join(REPO, 'backend', 'src', 'generated'), join(WT, 'backend', 'src', 'generated'), { recursive: true });
   writeFileSync(join(WT, SOURCE), SAMPLE);
   git(['add', SOURCE]);
@@ -81,10 +83,6 @@ before(() => {
 
 after(() => {
   if (!dockerReady) return;
-  for (const side of ['backend', 'frontend']) {
-    const link = join(WT, side, 'node_modules');
-    if (existsSync(link) && lstatSync(link).isSymbolicLink()) unlinkSync(link);
-  }
   spawnSync('git', ['worktree', 'remove', '--force', WT], { cwd: REPO });
   rmSync(TMP, { recursive: true, force: true });
 });

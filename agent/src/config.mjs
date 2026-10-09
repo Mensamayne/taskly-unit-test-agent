@@ -35,7 +35,6 @@ export function loadConfig(env = process.env) {
     budgets,
     sandbox,
     sandboxImage: env.UTA_SANDBOX_IMAGE || DEFAULT_IMAGE,
-    sandboxMounts: (env.UTA_SANDBOX_MOUNTS ?? '').split(',').map((s) => s.trim()).filter((s) => s.startsWith('/')),
     model: env.TEST_AGENT_MODEL || 'claude-sonnet-5-5',
     reviewerModel: env.TEST_AGENT_REVIEWER_MODEL || 'claude-haiku-5-5',
     bootstrapSkip: env.UTA_BOOTSTRAP_SKIP ? env.UTA_BOOTSTRAP_SKIP.split(',').map((s) => s.trim()) : DEFAULT_BOOTSTRAP_SKIP,
