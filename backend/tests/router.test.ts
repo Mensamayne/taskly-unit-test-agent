@@ -119,6 +119,40 @@ it('rejects duplicating with an invalid task ID with 422', async () => {
   expect(repository.create).not.toHaveBeenCalled();
 });
 
+it('removes only completed tasks, oldest first, and reports how many were removed', async () => {
+  const { app, repository } = setup();
+  repository.list.mockResolvedValue([
+    { ...todo, id: 5, completed: true },
+    { ...todo, id: 2, completed: false },
+    { ...todo, id: 3, completed: true },
+  ]);
+  repository.delete.mockResolvedValue(true);
+  const response = await request(app).delete('/api/todos/completed');
+  expect(response.status).toBe(200);
+  expect(response.body).toEqual({ removed: 2 });
+  expect(repository.delete.mock.calls).toEqual([[3], [5]]);
+});
+it('does not count completed tasks that were already gone when deleting', async () => {
+  const { app, repository } = setup();
+  repository.list.mockResolvedValue([
+    { ...todo, id: 1, completed: true },
+    { ...todo, id: 2, completed: true },
+  ]);
+  repository.delete.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+  const response = await request(app).delete('/api/todos/completed');
+  expect(response.status).toBe(200);
+  expect(response.body).toEqual({ removed: 1 });
+  expect(repository.delete).toHaveBeenCalledTimes(2);
+});
+it('removes nothing when no task is completed', async () => {
+  const { app, repository } = setup();
+  repository.list.mockResolvedValue([{ ...todo, id: 1, completed: false }]);
+  const response = await request(app).delete('/api/todos/completed');
+  expect(response.status).toBe(200);
+  expect(response.body).toEqual({ removed: 0 });
+  expect(repository.delete).not.toHaveBeenCalled();
+});
+
 afterEach(() => vi.useRealTimers());
 
 it('summarizes the stored tasks against the current date', async () => {
