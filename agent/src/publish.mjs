@@ -51,16 +51,27 @@ async function gh(args, { input, token } = {}) {
   return res.stdout;
 }
 
+/** Commit identity: the Actions bot in CI, the local git configuration when publishing by hand. */
+let identity = BOT;
+
 async function git(cwd, args) {
-  const res = await runCommand('git', ['-c', `user.name=${BOT.name}`, '-c', `user.email=${BOT.email}`, ...args], { cwd, timeoutMs: 60_000 });
+  const who = identity ? ['-c', `user.name=${identity.name}`, '-c', `user.email=${identity.email}`] : [];
+  const res = await runCommand('git', [...who, ...args], { cwd, timeoutMs: 60_000 });
   if (res.exitCode !== 0) throw new HarnessError('git_failed', `git ${args[0]}: ${res.stderr.trim() || res.stdout.trim()}`);
   return res.stdout.trim();
 }
 
+/** Login of the account the token belongs to; the sticky comment is the one it wrote. */
+async function currentLogin() {
+  if (identity === BOT) return BOT.name;
+  return (await gh(['api', 'user', '--jq', '.login'])).trim();
+}
+
 /** Create or update the single agent comment on a PR. */
 async function upsertComment(repo, pr, body) {
+  const login = await currentLogin();
   const comments = JSON.parse(await gh(['api', '--paginate', '--slurp', `repos/${repo}/issues/${pr}/comments`]));
-  const mine = comments.flat().find((c) => c.user?.login === BOT.name && typeof c.body === 'string' && c.body.includes(COMMENT_MARKER));
+  const mine = comments.flat().find((c) => c.user?.login === login && typeof c.body === 'string' && c.body.includes(COMMENT_MARKER));
   const payload = JSON.stringify({ body });
   if (mine) {
     await gh(['api', '-X', 'PATCH', `repos/${repo}/issues/comments/${mine.id}`, '--input', '-'], { input: payload });
@@ -79,7 +90,8 @@ function commitMessage(run, paths) {
  * @param {{ runDir: string | null, mode: 'commit' | 'comment', repo: string, pr: string | null,
  *           workspace: string, runUrl: string, baseBranch: string }} opts
  */
-export async function publish({ runDir, mode, repo, pr, workspace, runUrl, baseBranch }) {
+export async function publish({ runDir, mode, repo, pr, workspace, runUrl, baseBranch, local = false }) {
+  identity = local ? null : BOT;
   if (!runDir || !existsSync(join(runDir, 'run.json'))) {
     const body = `${COMMENT_MARKER}\n### Unit test agent\n\nThe agent run did not produce a result. See the workflow run: ${runUrl}\n`;
     if (pr) await upsertComment(repo, pr, body);
@@ -91,14 +103,15 @@ export async function publish({ runDir, mode, repo, pr, workspace, runUrl, baseB
   const paths = validatePatch(patch);
   const verified = run.stage === 'done' && Object.values(run.final ?? {}).every((f) => f.status === 'pass' && f.newTypeErrors === 0);
 
+  const patchLocation = runUrl ? `attached to the workflow run as \`tests.patch\` (${runUrl})` : 'kept in the run directory as `tests.patch`';
   let note;
   let commitSha = null;
   if (!paths.length) {
     note = 'No test changes to publish.';
   } else if (mode !== 'commit') {
-    note = `Mode comment: the accepted tests are attached to the workflow run as \`tests.patch\` (${runUrl}).`;
+    note = `Mode comment: the accepted tests are ${patchLocation}.`;
   } else if (!verified) {
-    note = 'Tests were not committed because the final verification did not pass. The patch is attached to the workflow run.';
+    note = `Tests were not committed because the final verification did not pass. The patch is ${patchLocation}.`;
   } else {
     if (pr) {
       const head = (await gh(['api', `repos/${repo}/pulls/${pr}`, '--jq', '.head.sha'])).trim();
@@ -124,7 +137,12 @@ export async function publish({ runDir, mode, repo, pr, workspace, runUrl, baseB
       }
       // The push uses GITHUB_TOKEN, which does not trigger CI on the new commit; record what the author job verified.
       await gh(['api', '-X', 'POST', `repos/${repo}/statuses/${commitSha}`, '--input', '-'], {
-        input: JSON.stringify({ state: 'success', context: 'unit-test-agent/verified', description: 'Typecheck and full suites passed on this tree in the agent run', target_url: runUrl }),
+        input: JSON.stringify({
+          state: 'success',
+          context: 'unit-test-agent/verified',
+          description: 'Typecheck and full suites passed on this tree in the agent run',
+          ...(runUrl ? { target_url: runUrl } : {}),
+        }),
       });
     }
   }
@@ -145,6 +163,7 @@ async function main() {
     workspace: resolve(args.workspace ?? '.'),
     runUrl: args['run-url'] ?? '',
     baseBranch: args.base ?? 'main',
+    local: args.identity === 'local',
   });
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   if (process.env.GITHUB_STEP_SUMMARY && result.note) {

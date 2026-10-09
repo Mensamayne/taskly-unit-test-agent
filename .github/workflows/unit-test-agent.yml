@@ -43,8 +43,20 @@ jobs:
       contents: read
     outputs:
       run-id: ${{ steps.run.outputs.run-id }}
+      skipped: ${{ steps.key.outputs.skipped }}
     steps:
+      - name: Check that the model key is configured
+        id: key
+        env:
+          HAS_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+        run: |
+          if [ "$HAS_KEY" != "true" ]; then
+            echo "::notice::Unit test agent skipped: the ANTHROPIC_API_KEY secret is not configured."
+            echo "Unit test agent skipped: the \`ANTHROPIC_API_KEY\` secret is not configured. The harness can still be run locally with \`uta run --author external\`." >> "$GITHUB_STEP_SUMMARY"
+            echo "skipped=true" >> "$GITHUB_OUTPUT"
+          fi
       - name: Check out the code under test
+        if: steps.key.outputs.skipped != 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -52,6 +64,7 @@ jobs:
           path: ws
           persist-credentials: false
       - name: Check out the trusted harness and agent configuration from the base branch
+        if: steps.key.outputs.skipped != 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ env.BASE_REF }}
@@ -60,7 +73,8 @@ jobs:
             agent
             .claude
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - if: steps.key.outputs.skipped != 'true'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: npm
@@ -69,14 +83,17 @@ jobs:
             ws/frontend/package-lock.json
             trusted/agent/package-lock.json
       - name: Install dependencies (no secrets in this step)
+        if: steps.key.outputs.skipped != 'true'
         run: |
           npm ci --prefix ws/backend
           npm ci --prefix ws/frontend
           npm ci --prefix trusted/agent
       - name: Pull the test sandbox image
+        if: steps.key.outputs.skipped != 'true'
         run: docker pull "$(node -e "import('./trusted/agent/src/config.mjs').then(m => console.log(m.loadConfig({}).sandboxImage))")"
       - name: Run the unit test agent
         id: run
+        if: steps.key.outputs.skipped != 'true'
         working-directory: ws
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -111,7 +128,9 @@ jobs:
 
   publish:
     needs: author
-    if: always() && needs.author.result != 'skipped' && needs.author.result != 'cancelled'
+    if: >-
+      always() && needs.author.result != 'skipped' && needs.author.result != 'cancelled' &&
+      needs.author.outputs.skipped != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

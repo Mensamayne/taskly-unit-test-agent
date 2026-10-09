@@ -68,6 +68,14 @@ A failing assertion that the author explains as a defect in the source is not re
 
 `.github/workflows/unit-test-agent.yml` runs on pull requests that touch `frontend/src` or `backend/src`, and on manual dispatch (bootstrap mode). The `author` job has the model key and a read-only token; the `publish` job has a write token, never runs repository code, validates the patch with `src/publish.mjs`, commits accepted tests to the PR branch (`TEST_AGENT_MODE=commit`, the default) or only reports (`comment`), and keeps one updated comment on the PR.
 
+Without the `ANTHROPIC_API_KEY` secret the workflow skips the agent with a notice. A local run (any driver) can be published to a pull request with the same validation:
+
+```sh
+node agent/src/publish.mjs --identity local --run .uta-runs/<run id> --repo <owner>/<repo> --pr <number> --workspace .
+```
+
+`--identity local` commits with your git identity and keeps the sticky comment under your account.
+
 ## Budgets
 
 Read from the environment and clamped to hard maximums in `src/config.mjs`: `UTA_MAX_TARGETS` (8, max 20), `UTA_MAX_REPAIRS` (2), `UTA_MAX_TOOL_RUNS` (4, max 6), `UTA_MAX_TURNS` (30, max 50), `UTA_USD_PER_TARGET` (1, max 2), `UTA_USD_PER_RUN` (6, max 10), `UTA_COMMAND_TIMEOUT_MS`, `UTA_STABILITY_RUNS`, `UTA_BOOTSTRAP_THRESHOLD`. Model: `TEST_AGENT_MODEL` (default `claude-sonnet-5-5`), reviewer `TEST_AGENT_REVIEWER_MODEL` (default `claude-haiku-5-5`).
