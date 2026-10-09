@@ -33,4 +33,6 @@ export const todosApi = {
     })
   },
   remove: (id: number) => request<void>(`/todos/${id}`, { method: 'DELETE' }),
+  duplicate: (id: number) =>
+    request<Todo>(`/todos/${id}/duplicate`, { method: 'POST' }),
 }

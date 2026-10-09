@@ -5,4 +5,5 @@ export const todoKeys = {
   create: ['todos', 'create'] as const,
   update: ['todos', 'update'] as const,
   delete: ['todos', 'delete'] as const,
+  duplicate: ['todos', 'duplicate'] as const,
 }

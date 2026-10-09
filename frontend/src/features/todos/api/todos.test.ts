@@ -58,6 +58,20 @@ it('deletes a task by ID', async () => {
   expect(request).toHaveBeenCalledWith('/todos/7', { method: 'DELETE' })
 })
 
+it('duplicates a task by ID with a POST and no body', async () => {
+  const copy = { ...todoFixture, id: 8 }
+  vi.mocked(request).mockResolvedValue(copy)
+  await expect(todosApi.duplicate(7)).resolves.toEqual(copy)
+  expect(request).toHaveBeenCalledWith('/todos/7/duplicate', {
+    method: 'POST',
+  })
+})
+
+it('propagates a failure when duplicating a task', async () => {
+  vi.mocked(request).mockRejectedValue(new Error('Not found'))
+  await expect(todosApi.duplicate(99)).rejects.toThrow('Not found')
+})
+
 it('fetches the task statistics with the abort signal', async () => {
   const signal = new AbortController().signal
   const stats = { total: 2, completed: 1, active: 1, overdue: 0 }
