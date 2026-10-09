@@ -7,6 +7,7 @@ import { HarnessError } from '../lib/errors.mjs';
 import { safeEnv } from '../lib/exec.mjs';
 import { skillsFor } from '../packet.mjs';
 import { saveRun, targetDir } from '../state.mjs';
+import { findingsInScope, reviewScope } from '../testfile.mjs';
 import { toolChangeContext, toolCoverage, toolRunTests } from '../tools.mjs';
 
 const AGENT = 'unit-test-author';
@@ -230,6 +231,9 @@ export function createSdkDriver({ configRoot }) {
     /** Advisory review of an accepted test file. Read-only tools; findings never block. */
     async review({ root, state, target, config }) {
       if ((state.costUsd ?? 0) >= config.budgets.usdPerRun) return null;
+      const changed = (target.result?.modifiedExistingAssertions ?? []).map((m) => m.test);
+      const scope = reviewScope(target.originalTestContent ?? null, readFileSync(join(root, target.testPath), 'utf8'), changed);
+      if (!scope.length) return [];
       const options = {
         cwd: root,
         projectConfigRoot: configRoot,
@@ -253,7 +257,12 @@ export function createSdkDriver({ configRoot }) {
         outputFormat: { type: 'json_schema', schema: REVIEW_SCHEMA },
         env: agentEnv(agentHome(state)),
       };
-      const prompt = `Review the unit tests in \`${target.testPath}\` for \`${target.path}\`. Return the findings object.`;
+      const prompt = [
+        `Review the unit tests in \`${target.testPath}\` for \`${target.path}\`.`,
+        'Only these tests were added or changed in this run; review them and nothing else (other tests in the file predate the run):',
+        ...scope.map((t) => `- ${t}`),
+        'Use the exact title in each finding. Return the findings object.',
+      ].join('\n');
       let result = null;
       let limited = false;
       try {
@@ -266,7 +275,7 @@ export function createSdkDriver({ configRoot }) {
       const cost = result?.total_cost_usd ?? (limited ? options.maxBudgetUsd : 0);
       state.costUsd = (state.costUsd ?? 0) + cost;
       saveRun(root, state);
-      return result?.subtype === 'success' ? (result.structured_output?.findings ?? []) : null;
+      return result?.subtype === 'success' ? findingsInScope(result.structured_output?.findings ?? [], scope) : null;
     },
   };
 }

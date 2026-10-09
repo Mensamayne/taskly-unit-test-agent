@@ -25,10 +25,6 @@ on:
 
 permissions: {}
 
-concurrency:
-  group: unit-test-agent-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
-
 env:
   BASE_REF: ${{ github.event.pull_request.base.ref || github.event.repository.default_branch }}
 
@@ -39,21 +35,37 @@ jobs:
       (!github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # A newer push cancels a running author job. Concurrency is per job so that a push made by
+    # the publish job (the agent's own commit) cannot cancel that publish job mid-way.
+    concurrency:
+      group: unit-test-agent-author-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
     permissions:
       contents: read
     outputs:
       run-id: ${{ steps.run.outputs.run-id }}
       skipped: ${{ steps.key.outputs.skipped }}
+      skip-reason: ${{ steps.key.outputs.skip-reason }}
     steps:
-      - name: Check that the model key is configured
+      - name: Decide whether the agent runs
         id: key
         env:
           HAS_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          if [ "$HAS_KEY" != "true" ]; then
+          # The agent's own test commit triggers this workflow again when it is pushed with
+          # UNIT_TEST_AGENT_TOKEN. Running on it would only re-plan the same diff, so stop here.
+          if [ -n "$HEAD_SHA" ] && gh api "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA" --jq .commit.message | grep -q '^Accepted by the unit-test agent (run '; then
+            echo "::notice::Unit test agent skipped: the head commit is the agent's own test commit."
+            echo "Unit test agent skipped: the head commit is the agent's own test commit." >> "$GITHUB_STEP_SUMMARY"
+            echo "skipped=true" >> "$GITHUB_OUTPUT"
+            echo "skip-reason=agent_commit" >> "$GITHUB_OUTPUT"
+          elif [ "$HAS_KEY" != "true" ]; then
             echo "::notice::Unit test agent skipped: the ANTHROPIC_API_KEY secret is not configured."
             echo "Unit test agent skipped: the \`ANTHROPIC_API_KEY\` secret is not configured. The harness can still be run locally with \`uta run --author external\`." >> "$GITHUB_STEP_SUMMARY"
             echo "skipped=true" >> "$GITHUB_OUTPUT"
+            echo "skip-reason=missing_api_key" >> "$GITHUB_OUTPUT"
           fi
       - name: Check out the code under test
         if: steps.key.outputs.skipped != 'true'
@@ -129,10 +141,16 @@ jobs:
   publish:
     needs: author
     # Run when the author job ran (including "skipped for missing key") so the PR still gets a sticky comment.
-    # Do not run when the author job itself was skipped (draft / fork) or cancelled.
-    if: always() && needs.author.result != 'skipped' && needs.author.result != 'cancelled'
+    # Do not run when the author job itself was skipped (draft / fork) or cancelled, or when it
+    # stopped on the agent's own commit (the comment from the run that made it must stay).
+    if: >-
+      always() && needs.author.result != 'skipped' && needs.author.result != 'cancelled' &&
+      needs.author.outputs.skip-reason != 'agent_commit'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    concurrency:
+      group: unit-test-agent-publish-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: false
     permissions:
       contents: write
       pull-requests: write
@@ -150,6 +168,10 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.ref || github.ref }}
           path: ws
+          # A push made with GITHUB_TOKEN does not start other workflows, so CI would never run on
+          # the agent's commit. UNIT_TEST_AGENT_TOKEN (contents and pull requests write on this
+          # repository only) makes the push a normal one; without it the default token is used.
+          token: ${{ secrets.UNIT_TEST_AGENT_TOKEN || github.token }}
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
@@ -163,14 +185,15 @@ jobs:
       - name: Validate the patch, publish tests, and update the PR comment
         env:
           GH_TOKEN: ${{ github.token }}
+          PUSH_TOKEN: ${{ secrets.UNIT_TEST_AGENT_TOKEN }}
           MODE: ${{ vars.TEST_AGENT_MODE || 'commit' }}
           PR: ${{ github.event.pull_request.number }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           HAS_RUN: ${{ steps.download.outcome == 'success' }}
-          AUTHOR_SKIPPED: ${{ needs.author.outputs.skipped }}
+          SKIP_REASON: ${{ needs.author.outputs.skip-reason }}
         run: |
           args=(--mode "$MODE" --repo "$GITHUB_REPOSITORY" --workspace ws --run-url "$RUN_URL" --base "$BASE_REF")
           [ -n "$PR" ] && args+=(--pr "$PR")
           [ "$HAS_RUN" = "true" ] && args+=(--run run)
-          [ "$AUTHOR_SKIPPED" = "true" ] && args+=(--skip-reason missing_api_key)
+          [ -n "$SKIP_REASON" ] && args+=(--skip-reason "$SKIP_REASON")
           node trusted/agent/src/publish.mjs "${args[@]}"

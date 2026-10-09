@@ -124,6 +124,33 @@ export function removedAssertionLines(before, after) {
     .filter((l) => /\bexpect\s*\(/.test(l) && !afterLines.has(l));
 }
 
+/**
+ * Titles of the tests the author added (every test of a new file), plus existing tests it says it changed.
+ * The reviewer is scoped to these so pre-existing tests in the same file do not drown its notes.
+ * @param {string | null} before
+ * @param {string} after
+ * @param {string[]} [changed] titles from the author's modifiedExistingAssertions
+ */
+export function reviewScope(before, after, changed = []) {
+  const old = new Set(before ? extractTitles(before) : []);
+  const now = extractTitles(after);
+  return now.filter((t) => !old.has(t) || changed.includes(t));
+}
+
+/**
+ * Keep only findings that name a test in scope. The model may quote a title partially or with its describe prefix.
+ * @param {{ test: string }[]} findings
+ * @param {string[]} titles
+ */
+export function findingsInScope(findings, titles) {
+  const norm = (s) => String(s ?? '').trim().toLowerCase();
+  const scope = titles.map(norm).filter(Boolean);
+  return findings.filter((f) => {
+    const t = norm(f.test);
+    return t && scope.some((s) => t === s || t.includes(s) || s.includes(t));
+  });
+}
+
 /** Directory of a repo-relative path (POSIX). */
 export function dirOf(relPath) {
   return dirname(relPath).split('\\').join('/');

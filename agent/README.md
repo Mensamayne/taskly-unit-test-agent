@@ -16,7 +16,7 @@ preflight -> collect diff -> baseline (suites, coverage, tsc) -> plan
 | `external` | The run stops at every target and hands the task packet to whoever runs the CLI (a person, Cursor, Claude Code). Refused when `CI=true`. |
 | `stub` | Replays recorded author output from a JSON script. Used by the harness tests. |
 
-After a target is accepted, the `sdk` driver asks the read-only `test-reviewer` agent for advisory findings (shown in the report, never blocking).
+After a target is accepted, the `sdk` driver asks the read-only `test-reviewer` agent for advisory findings (shown in the report, never blocking). The reviewer is given only the tests added in the run (plus existing ones the author reports changing), and findings about other tests are dropped.
 
 Every driver gets the same task packet (`prompt.md`), the same tools, the same budgets, and the same gates. The host owns the state; nothing an author claims is trusted.
 
@@ -69,7 +69,7 @@ A failing assertion that the author explains as a defect in the source is not re
 
 ## In GitHub Actions
 
-`.github/workflows/unit-test-agent.yml` runs on pull requests that touch `frontend/src` or `backend/src`, and on manual dispatch (bootstrap mode). The `author` job has the model key and a read-only token; the `publish` job has a write token, never runs repository code, validates the patch with `src/publish.mjs`, commits accepted tests to the PR branch (`TEST_AGENT_MODE=commit`, the default) or only reports (`comment`), and keeps one updated comment on the PR.
+`.github/workflows/unit-test-agent.yml` runs on pull requests that touch `frontend/src` or `backend/src`, and on manual dispatch (bootstrap mode). The `author` job has the model key and a read-only token; the `publish` job has a write token, never runs repository code, validates the patch with `src/publish.mjs`, commits accepted tests to the PR branch (`TEST_AGENT_MODE=commit`, the default) or only reports (`comment`), and keeps one updated comment on the PR. With the `UNIT_TEST_AGENT_TOKEN` secret the commit is pushed with that token, so CI runs on it; the next agent run sees its own commit (message `Accepted by the unit-test agent (run ...)`) as the PR head and stops without touching the comment.
 
 Without the `ANTHROPIC_API_KEY` secret the author job skips generation and the publish job still updates the sticky PR comment explaining the skip. A local run (any driver) can be published to a pull request with the same validation:
 

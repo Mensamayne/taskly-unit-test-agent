@@ -15,7 +15,7 @@ A custom agent that writes and updates Vitest unit tests for the Taskly backend 
 | Backend | 33.0% (48 tests) | 97.4% (96 tests) |
 | Frontend | 47.7% (18 tests) | 97.6% (97 tests) |
 
-Pull requests: [#1 harness](https://github.com/Mensamayne/taskly-unit-test-agent/pull/1), [#2 bootstrap tests](https://github.com/Mensamayne/taskly-unit-test-agent/pull/2), [#3 example feature](https://github.com/Mensamayne/taskly-unit-test-agent/pull/3), [#6](https://github.com/Mensamayne/taskly-unit-test-agent/pull/6) and [#7](https://github.com/Mensamayne/taskly-unit-test-agent/pull/7) hardening and verification, [#11](https://github.com/Mensamayne/taskly-unit-test-agent/pull/11) external-author dogfood (repair, write, update, publish, Actions skip notice).
+Pull requests: [#1 harness](https://github.com/Mensamayne/taskly-unit-test-agent/pull/1), [#2 bootstrap tests](https://github.com/Mensamayne/taskly-unit-test-agent/pull/2), [#3 example feature](https://github.com/Mensamayne/taskly-unit-test-agent/pull/3), [#6](https://github.com/Mensamayne/taskly-unit-test-agent/pull/6) and [#7](https://github.com/Mensamayne/taskly-unit-test-agent/pull/7) hardening and verification, [#11](https://github.com/Mensamayne/taskly-unit-test-agent/pull/11) external-author dogfood (repair, write, update, publish, Actions skip notice), [#13](https://github.com/Mensamayne/taskly-unit-test-agent/pull/13) a feature tested by the real model in Actions.
 
 ## Main technical decisions
 
@@ -35,22 +35,23 @@ preflight -> diff -> baseline (suites, coverage, tsc) -> plan
 
 **Least privilege.** The `author` job has the model key and a read-only token; every Vitest and `tsc` run happens in a Docker container without network or secrets; the harness and `.claude/` come from the base branch, so a PR cannot change the agent that reviews it. The `publish` job has a write token, never runs repository code, re-validates the test-only patch, checks the PR head did not move, commits, and keeps one updated PR comment.
 
-**Small stack.** Plain Node ESM, no LangChain or LangGraph; two runtime dependencies (Agent SDK, zod); 43 harness tests, including end-to-end runs on real Vitest and `tsc`, the real Agent SDK against a scripted Messages API, and the Docker sandbox in CI.
+**Small stack.** Plain Node ESM, no LangChain or LangGraph; two runtime dependencies (Agent SDK, zod); 50 harness tests, including end-to-end runs on real Vitest and `tsc`, the real Agent SDK against a scripted Messages API, and the Docker sandbox in CI.
 
 ## Running the PR workflow
 
 Prerequisites:
 
 1. Repository secret `ANTHROPIC_API_KEY` (without it the author job skips generation; the publish job still posts a sticky PR comment explaining the skip).
-2. Settings, Actions, General: allow GitHub Actions to create pull requests (bootstrap mode).
-3. Optional variables: `TEST_AGENT_MODE` (`commit` default, or `comment`), `TEST_AGENT_MODEL`.
-4. GitHub-hosted `ubuntu-latest` runners (Docker preinstalled).
+2. Optional secret `UNIT_TEST_AGENT_TOKEN`: a fine-grained token with contents and pull requests write on this repository. The agent's commit is pushed with it so CI runs on that commit (a `GITHUB_TOKEN` push starts no workflows). The agent's own commit is recognized by its message and does not start another agent run.
+3. Settings, Actions, General: allow GitHub Actions to create pull requests (bootstrap mode).
+4. Optional variables: `TEST_AGENT_MODE` (`commit` default, or `comment`), `TEST_AGENT_MODEL`.
+5. GitHub-hosted `ubuntu-latest` runners (Docker preinstalled).
 
 It runs automatically on pull requests that change `frontend/src/**` or `backend/src/**` (drafts and forks skipped), and manually ("Run workflow") in bootstrap mode, which covers files below 80% and opens a PR. Locally, see the CLI in [`agent/README.md`](agent/README.md); `--author external` needs no key.
 
 ## Custom agent and skills
 
-`unit-test-author` writes tests for one source file per session. Tools: `Read`, `Grep`, `Glob`, `Write`, `Edit`, `Skill`, and three task-scoped MCP tools served by the harness (`get_change_context`, `run_tests`, `coverage_for_file`); no shell, no web. A `PreToolUse` hook denies writes outside the target's test file. The final answer is a schema-checked JSON report (structured output). The harness reads the agent file and applies its prompt and tools to the SDK session, which runs with an isolated home directory. `test-reviewer` is read-only, runs after acceptance, and adds advisory notes.
+`unit-test-author` writes tests for one source file per session. Tools: `Read`, `Grep`, `Glob`, `Write`, `Edit`, `Skill`, and three task-scoped MCP tools served by the harness (`get_change_context`, `run_tests`, `coverage_for_file`); no shell, no web. A `PreToolUse` hook denies writes outside the target's test file. The final answer is a schema-checked JSON report (structured output). The harness reads the agent file and applies its prompt and tools to the SDK session, which runs with an isolated home directory. `test-reviewer` is read-only, runs after acceptance, and adds advisory notes about the tests added or changed in the run only (pre-existing tests in the same file are out of scope).
 
 | Skill | Used for |
 |-------|----------|
@@ -62,7 +63,21 @@ It runs automatically on pull requests that change `frontend/src/**` or `backend
 
 The task packet names the skills for each target; the same `SKILL.md` files work in CI and in a developer's Claude Code.
 
-## Example run: PR #3
+## Example run with the real model: PR #13
+
+[PR #13](https://github.com/Mensamayne/taskly-unit-test-agent/pull/13) adds "duplicate a task" (`POST /api/todos/:id/duplicate`, a title helper, a mutation hook, a button in `TodoItem`) without tests; the new hook also broke the existing `TodoItem` test. The workflow ran the `sdk` driver unattended:
+
+| File | Decision | Outcome |
+|------|----------|---------|
+| `TodoItem.tsx` | repair-existing | accepted; the new hook mocked, the existing assertion kept, tests for the button added |
+| `useDuplicateTodoMutation.ts` | write | accepted, 6/6 target lines |
+| `duplicate.ts` | write | accepted, 4/4; includes the edge case where the cut lands on a space |
+| `router.ts` | update | accepted, 3/3 |
+| `api/todos.ts` | update | accepted, 1/1 |
+
+`queryKeys.ts` was a `noop` (outside the coverage scope). Final suites: backend 112 and frontend 109 tests, no new type errors. Five test files were committed by the publish job; model cost about 0.96 USD. The reviewer flagged one weak assertion in the router test (length and suffix instead of the exact title).
+
+## Example run with the external driver: PR #3
 
 [PR #3](https://github.com/Mensamayne/taskly-unit-test-agent/pull/3) adds task statistics (`GET /api/todos/stats`, a `TodoStats` component, sort by title). On purpose, `computeStats` contained a defect (completed tasks counted as overdue, contrary to its documented contract), and the new component broke eight existing `TodosPage` tests.
 
@@ -80,7 +95,7 @@ Seven files were `noop` with a reason each. Final verification: backend 92 and f
 
 [PR #2](https://github.com/Mensamayne/taskly-unit-test-agent/pull/2) is a bootstrap run: 20 of 20 targets accepted; its body is the agent's report.
 
-These runs used the `external` driver with Claude Code as the author, because the repository has no model key yet: same packets, skills, tools, and gates as the `sdk` driver. The `sdk` driver is verified end to end against a scripted Messages API (`agent/test/sdk.e2e.test.mjs`), which found three wiring problems described in [`docs/edge-cases.md`](docs/edge-cases.md).
+PR #2 and PR #3 used the `external` driver with Claude Code as the author, before the repository had a model key: same packets, skills, tools, and gates as the `sdk` driver. The `sdk` driver is verified end to end against a scripted Messages API (`agent/test/sdk.e2e.test.mjs`), which found three wiring problems described in [`docs/edge-cases.md`](docs/edge-cases.md).
 
 ## Assumptions
 
@@ -91,8 +106,8 @@ These runs used the `external` driver with Claude Code as the author, because th
 
 ## Limitations
 
-- No Actions run with the real model yet when the repository secret is unset: the SDK wiring is verified locally against a scripted API, and the full PR path is dogfooded with `--author external`. The Docker sandbox runs on Linux only.
-- Commits pushed with `GITHUB_TOKEN` do not retrigger CI; the publisher sets a commit status from the verified run instead.
+- The Docker sandbox runs on Linux only; local runs on Windows or macOS use the host.
+- Without `UNIT_TEST_AGENT_TOKEN`, the agent's commit is pushed with `GITHUB_TOKEN` and CI does not run on it; the publisher always sets the `unit-test-agent/verified` commit status from the verified run.
 - Coverage is a proxy: changed lines that existing tests execute are a `noop` even if the new behavior is not asserted. Gains are measured on lines, not branches.
 - Static checks are regular expressions; a correctly named but wrong defect claim reaches the report (labeled unverified).
 - USD limits are checked between model turns, so a session can exceed its allowance by one turn.
@@ -100,7 +115,7 @@ These runs used the `external` driver with Claude Code as the author, because th
 
 ## What I would change for production
 
-- A GitHub App identity, so CI reruns on the agent's commits and branch protection can require them.
+- A GitHub App identity instead of a personal token, so the agent's commits have their own author and branch protection can tell them apart.
 - Mutation testing (for example Stryker) as an extra value gate; branch-aware coverage gains.
 - Run history across pushes in the PR comment; parallel targets; baseline cache per base commit.
 - An evaluation set of past PRs to measure changes to prompts, skills, or models; cost dashboards from `run.json`.
