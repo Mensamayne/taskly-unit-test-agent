@@ -16,7 +16,7 @@ const EXIT = { ok: 0, error: 1, usage: 2, awaiting: 3, failed: 4 };
 
 const USAGE = `uta: Taskly unit-test agent
 
-  uta run --mode pr --base <ref> [--head <ref>] [--author sdk|external|stub] [--stub <file>]
+  uta run --mode pr --base <ref> [--head <ref>] [--author sdk|external|stub] [--stub <file>] [--config-root <dir>]
   uta run --mode bootstrap [--sides backend,frontend] [--author ...]
   uta status [--run <id>]
   uta packet --target <id> [--json]
@@ -65,10 +65,14 @@ async function repoRoot(flags) {
   return resolve(out.stdout.trim());
 }
 
-function makeDriver(kind, flags) {
+async function makeDriver(kind, flags, root) {
   if (kind === 'external') return createExternalDriver();
   if (kind === 'stub') return createStubDriver(resolve(str(flags, 'stub', true)));
-  if (kind === 'sdk') throw new HarnessError('driver_unavailable', 'The sdk driver is not wired yet. Use --author external or --author stub.');
+  if (kind === 'sdk') {
+    // Loaded on demand: the other drivers and the harness tests do not need the SDK installed.
+    const { createSdkDriver } = await import('./author/sdk.mjs');
+    return createSdkDriver({ configRoot: resolve(str(flags, 'config-root') ?? root) });
+  }
   throw new HarnessError('usage', `Unknown --author ${kind}.`);
 }
 
@@ -119,7 +123,7 @@ async function main(argv) {
     case 'run': {
       const mode = str(flags, 'mode', true);
       if (mode !== 'pr' && mode !== 'bootstrap') throw new HarnessError('usage', '--mode must be pr or bootstrap.');
-      const driver = makeDriver(str(flags, 'author') ?? 'sdk', flags);
+      const driver = await makeDriver(str(flags, 'author') ?? 'sdk', flags, root);
       const sides = str(flags, 'sides')?.split(',').map((s) => s.trim());
       const state = await startRun({ root, mode, base: str(flags, 'base', mode === 'pr'), head: str(flags, 'head') ?? 'HEAD', sides, driver, config });
       log(`run ${state.runId}: ${state.targets.length} target(s), ${state.noops.length} file(s) without action`);
@@ -129,7 +133,7 @@ async function main(argv) {
     }
     case 'resume': {
       const state = loadRun(root, str(flags, 'run'));
-      const driver = makeDriver(str(flags, 'author') ?? state.driver, flags);
+      const driver = await makeDriver(str(flags, 'author') ?? state.driver, flags, root);
       const { outcome } = await advance({ root, state, driver, config, log });
       print(summarize(state, outcome));
       return exitFor(outcome);

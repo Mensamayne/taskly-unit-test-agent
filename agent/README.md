@@ -12,9 +12,11 @@ preflight -> collect diff -> baseline (suites, coverage, tsc) -> plan
 
 | Driver | Use |
 |--------|-----|
-| `sdk` | Claude Agent SDK with the custom agent in `.claude/agents/`. Default in CI. Not wired yet. |
+| `sdk` | Claude Agent SDK session per target with the custom agent `.claude/agents/unit-test-author.md` and the skills in `.claude/skills/`. Repairs resume the same session. Default in CI. Needs `ANTHROPIC_API_KEY`. |
 | `external` | The run stops at every target and hands the task packet to whoever runs the CLI (a person, Cursor, Claude Code). Refused when `CI=true`. |
 | `stub` | Replays recorded author output from a JSON script. Used by the harness tests. |
+
+After a target is accepted, the `sdk` driver asks the read-only `test-reviewer` agent for advisory findings (shown in the report, never blocking).
 
 Every driver gets the same task packet (`prompt.md`), the same tools, the same budgets, and the same gates. The host owns the state; nothing an author claims is trusted.
 
@@ -36,7 +38,9 @@ node agent/src/cli.mjs abort
 
 `--mode bootstrap [--sides backend,frontend]` targets files below the line coverage threshold instead of a diff.
 
-Output is JSON on stdout. Exit codes: 0 ok, 1 error, 2 usage, 3 awaiting author, 4 run failed (scope violation).
+`--config-root <dir>` points the `sdk` driver at the checkout whose `.claude/` (agent, skills, hooks) is trusted. In CI that is the base branch, so a pull request cannot change the agent that reviews it.
+
+Output is JSON on stdout. Exit codes: 0 ok, 1 error, 2 usage, 3 awaiting author, 4 run failed (scope violation or author error).
 
 Run state lives in `.uta-runs/<run id>/` (gitignored): `state.json`, per-target packets, gate logs, and the final `report.md`, `tests.patch`, `run.json`.
 
@@ -60,9 +64,13 @@ A failing assertion that the author explains as a defect in the source is not re
 - `TEST_SANDBOX=docker` runs Vitest and tsc in a container with no network and resource limits (CI).
 - The write allowlist (`backend/tests/**/*.test.ts`, `frontend/src/**/*.test.ts(x)`) is enforced by the write hook (`uta hook`), by G1, and again before publishing.
 
+## In GitHub Actions
+
+`.github/workflows/unit-test-agent.yml` runs on pull requests that touch `frontend/src` or `backend/src`, and on manual dispatch (bootstrap mode). The `author` job has the model key and a read-only token; the `publish` job has a write token, never runs repository code, validates the patch with `src/publish.mjs`, commits accepted tests to the PR branch (`TEST_AGENT_MODE=commit`, the default) or only reports (`comment`), and keeps one updated comment on the PR.
+
 ## Budgets
 
-Read from the environment and clamped to hard maximums in `src/config.mjs`: `UTA_MAX_TARGETS` (8, max 20), `UTA_MAX_REPAIRS` (2), `UTA_MAX_TOOL_RUNS` (4, max 6), `UTA_COMMAND_TIMEOUT_MS`, `UTA_STABILITY_RUNS`, `UTA_BOOTSTRAP_THRESHOLD`.
+Read from the environment and clamped to hard maximums in `src/config.mjs`: `UTA_MAX_TARGETS` (8, max 20), `UTA_MAX_REPAIRS` (2), `UTA_MAX_TOOL_RUNS` (4, max 6), `UTA_MAX_TURNS` (30, max 50), `UTA_USD_PER_TARGET` (1, max 2), `UTA_USD_PER_RUN` (6, max 10), `UTA_COMMAND_TIMEOUT_MS`, `UTA_STABILITY_RUNS`, `UTA_BOOTSTRAP_THRESHOLD`. Model: `TEST_AGENT_MODEL` (default `claude-sonnet-5-5`), reviewer `TEST_AGENT_REVIEWER_MODEL` (default `claude-haiku-5-5`).
 
 ## Tests
 

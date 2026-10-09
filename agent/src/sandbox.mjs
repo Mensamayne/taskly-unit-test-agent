@@ -6,7 +6,8 @@ import { runCommand, safeEnv } from './lib/exec.mjs';
  * Run `node <args>` inside a package directory (`frontend` or `backend`).
  *
  * - local: subprocess with an allowlisted environment (no secrets).
- * - docker: throwaway container, no network, resource limits, repo mounted at /work.
+ * - docker: throwaway container, no network, resource limits. The repository is mounted at
+ *   the same absolute path as on the host, so paths in Vitest and coverage reports match.
  *
  * `args` must use paths relative to the package directory with forward slashes,
  * so the same arguments work on the host and in the container.
@@ -22,7 +23,7 @@ export async function runNode({ root, side, args, config, timeoutMs }) {
       '--memory', '2g', '--cpus', '2', '--pids-limit', '512',
       ...user,
       '-e', 'CI=true', '-e', 'TZ=UTC', '-e', 'NO_COLOR=1', '-e', 'HOME=/tmp',
-      '-v', `${root}:/work`, '-w', `/work/${side}`,
+      '-v', `${root}:${root}`, '-w', `${root}/${side}`,
       config.sandboxImage, 'node', ...args,
     ];
     // The docker client itself needs no secrets either.

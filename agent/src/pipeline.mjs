@@ -235,6 +235,15 @@ export async function advance({ root, state, driver, config, log = () => {} }) {
     if (submitted) {
       const res = await gateTarget({ root, state, targetId: submitted.id, config });
       log(`${submitted.id} ${submitted.path}: ${res.outcome}${res.gate.gate ? ` (${res.gate.gate} ${res.gate.class})` : ''}`);
+      if (res.outcome === 'accepted' && driver.review) {
+        try {
+          submitted.reviewFindings = await driver.review({ root, state, target: submitted, config });
+        } catch (err) {
+          submitted.reviewFindings = null;
+          log(`${submitted.id} review skipped: ${err.message}`);
+        }
+        saveRun(root, state);
+      }
       continue;
     }
 
@@ -251,21 +260,43 @@ export async function advance({ root, state, driver, config, log = () => {} }) {
     }
     if (driver.kind === 'external') return { outcome: 'awaiting-author', target: authoring };
 
+    const blocked = driver.budgetBlock?.(state, authoring, config);
+    if (blocked) {
+      restoreFile(root, authoring.testPath, authoring.originalTestContent);
+      Object.assign(authoring, { status: 'rejected', outcome: `not attempted: ${blocked}` });
+      clearActive(root);
+      saveRun(root, state);
+      log(`${authoring.id} ${authoring.path}: ${authoring.outcome}`);
+      continue;
+    }
     const { packet, prompt } = renderTaskPacket({ root, state, target: authoring, budgets: config.budgets });
-    const raw = await driver.author({ root, state, target: authoring, packet, prompt, config });
+    let raw;
+    try {
+      raw = await driver.author({ root, state, target: authoring, packet, prompt, config });
+    } catch (err) {
+      // An author that cannot run (auth, network, API error) ends the run with a report, not a crash.
+      abortRun(root, state, `author failed on ${authoring.id}: ${err.message}`, 'author_error');
+      await writeReport(root, state);
+      saveRun(root, state);
+      log(`${authoring.id} ${authoring.path}: author error: ${err.message}`);
+      return { outcome: 'failed' };
+    }
     submitResult(root, state, authoring.id, raw);
   }
 }
 
 /** Abandon the current run: restore the target being authored and mark the run failed. */
-export function abortRun(root, state, reason) {
+export function abortRun(root, state, reason, code = 'aborted') {
   for (const t of state.targets) {
     if (t.status === 'authoring' || t.status === 'submitted') {
       if (t.attempts > 0) restoreFile(root, t.testPath, t.originalTestContent ?? null);
-      Object.assign(t, { status: 'rejected', outcome: 'aborted' });
+      Object.assign(t, { status: 'rejected', outcome: code === 'aborted' ? 'aborted' : 'author error' });
     }
   }
-  Object.assign(state, { stage: 'failed', failure: { code: 'aborted', message: reason } });
+  for (const t of state.targets) {
+    if (t.status === 'pending') Object.assign(t, { status: 'rejected', outcome: 'not attempted' });
+  }
+  Object.assign(state, { stage: 'failed', failure: { code, message: reason } });
   clearActive(root);
   saveRun(root, state);
 }

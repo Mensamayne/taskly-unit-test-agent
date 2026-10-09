@@ -19,6 +19,7 @@ export function createStubDriver(scriptFile) {
       const attempts = script[target.path] ?? [];
       const step = attempts[Math.min(target.attempts, attempts.length) - 1];
       if (!step) return {};
+      if (step.throw) throw new Error(step.throw);
       for (const [path, content] of Object.entries(step.files ?? {})) {
         const check = checkWrite(root, path, [target.testPath]);
         if (!check.ok) throw new HarnessError('write_denied', check.reason);

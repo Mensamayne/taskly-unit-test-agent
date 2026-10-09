@@ -95,11 +95,10 @@ const READ_TOOLS = new Set(['Read', 'Grep', 'Glob']);
  */
 export function evaluateToolUse(root, event, active) {
   if (!active) return { decision: 'allow' };
+  // Which tools exist is decided by the SDK session options (no Bash, no web). This hook
+  // narrows file access; writes that bypass it (an external author's shell) are caught by G1.
   const tool = event.tool_name ?? '';
   const input = event.tool_input ?? {};
-  if (tool === 'Bash' || tool === 'WebFetch' || tool === 'WebSearch') {
-    return { decision: 'deny', reason: `${tool} is not available to the unit-test author during a run` };
-  }
   if (WRITE_TOOLS.has(tool)) {
     const target = input.file_path ?? input.notebook_path;
     const check = checkWrite(root, target, active.allowedWrites);

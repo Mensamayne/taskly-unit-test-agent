@@ -89,7 +89,15 @@ export function renderReport(state) {
   }
   lines.push('');
 
+  const reviewed = accepted.filter((t) => t.reviewFindings?.length);
+  if (reviewed.length) {
+    lines.push('**Reviewer notes** (advisory)', '');
+    for (const t of reviewed) for (const f of t.reviewFindings) lines.push(`- \`${t.testPath}\` ${escapeCell(f.test)}: ${escapeCell(f.check)}. ${escapeCell(f.note)}`);
+    lines.push('');
+  }
+
   lines.push('<details><summary>Run details</summary>', '');
+  if (state.costUsd) lines.push(`- Model cost (estimate): $${state.costUsd.toFixed(2)}`);
   for (const [side, b] of Object.entries(state.baseline)) {
     lines.push(`- Baseline ${side}: ${b.tests} tests, ${b.linePercent}% lines, ${b.failingTests.length} failing`);
   }

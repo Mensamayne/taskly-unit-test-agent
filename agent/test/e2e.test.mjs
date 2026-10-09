@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { after, before, describe, it } from 'node:test';
@@ -81,7 +81,16 @@ before(() => {
   git(['commit', '-qm', 'feat: count completed tasks']);
 });
 
+/** Remove the dependency links before anything deletes the worktree, so no tool follows them into the real node_modules. */
+function unlinkDependencies() {
+  for (const side of ['backend', 'frontend']) {
+    const link = join(WT, side, 'node_modules');
+    if (existsSync(link) && lstatSync(link).isSymbolicLink()) unlinkSync(link);
+  }
+}
+
 after(() => {
+  unlinkDependencies();
   spawnSync('git', ['worktree', 'remove', '--force', WT], { cwd: REPO });
   rmSync(TMP, { recursive: true, force: true });
 });
@@ -146,6 +155,18 @@ describe('uta end to end', { timeout: 600_000 }, () => {
     assert.match(gate.json.message, /backend\/src\/features\/todos\/stats\.ts/);
     assert.equal(existsSync(join(WT, '.uta-runs', '.active')), false);
     assert.equal(uta(['status']).json.failure.code, 'scope_violation');
+  });
+
+  it('ends the run with a report when the author fails', () => {
+    resetWorktree();
+    const script = join(TMP, 'stub-throw.json');
+    writeFileSync(script, JSON.stringify({ 'backend/src/features/todos/stats.ts': [{ throw: 'model API unavailable' }] }));
+    const run = uta(['run', '--mode', 'pr', '--base', 'HEAD~1', '--author', 'stub', '--stub', script]);
+    assert.equal(run.code, 4, run.stdout + run.stderr);
+    assert.equal(run.json.failure.code, 'author_error');
+    assert.match(run.json.failure.message, /model API unavailable/);
+    assert.equal(existsSync(join(WT, '.uta-runs', '.active')), false);
+    assert.match(readFileSync(run.json.artifacts.report, 'utf8'), /Run failed: author_error/);
   });
 
   it('refuses the external driver in CI', () => {

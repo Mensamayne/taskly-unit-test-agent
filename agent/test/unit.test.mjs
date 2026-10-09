@@ -67,7 +67,7 @@ describe('guard', () => {
     assert.equal(evaluateToolUse(ROOT, write, null).decision, 'allow');
     const active = { allowedWrites: ['backend/tests/factory.test.ts'] };
     assert.equal(evaluateToolUse(ROOT, write, active).decision, 'deny');
-    assert.equal(evaluateToolUse(ROOT, { tool_name: 'Bash', tool_input: { command: 'ls' } }, active).decision, 'deny');
+    assert.equal(evaluateToolUse(ROOT, { tool_name: 'NotebookEdit', tool_input: { notebook_path: 'backend/src/x.ipynb' } }, active).decision, 'deny');
     assert.equal(evaluateToolUse(ROOT, { tool_name: 'Read', tool_input: { file_path: '.env' } }, active).decision, 'deny');
     const ok = { tool_name: 'Edit', tool_input: { file_path: 'backend/tests/factory.test.ts' } };
     assert.equal(evaluateToolUse(ROOT, ok, active).decision, 'allow');
@@ -299,5 +299,34 @@ describe('report', () => {
     assert.match(body, /\| `backend\/src\/a.ts` \| write \| `backend\/tests\/a.test.ts` \| accepted \| 2\/2 target lines \|/);
     assert.match(body, /counts overdue\. completed tasks are counted/);
     assert.match(body, /failing assertion: expected 2 to be 1$/m);
+  });
+});
+
+describe('publish patch validation', async () => {
+  const { validatePatch } = await import('../src/publish.mjs');
+  const newFile = (path) => [
+    `diff --git a/${path} b/${path}`,
+    'new file mode 100644',
+    'index 0000000..1111111',
+    '--- /dev/null',
+    `+++ b/${path}`,
+    '@@ -0,0 +1 @@',
+    "+it('x', () => expect(1).toBe(1))",
+  ].join('\n');
+
+  it('accepts new and modified allowlisted test files', () => {
+    const modified = ['diff --git a/backend/tests/router.test.ts b/backend/tests/router.test.ts', 'index 1..2 100644', '--- a/backend/tests/router.test.ts', '+++ b/backend/tests/router.test.ts', '@@ -1 +1,2 @@', '+x'].join('\n');
+    assert.deepEqual(validatePatch(`${newFile('frontend/src/lib/http.test.ts')}\n${modified}\n`), ['frontend/src/lib/http.test.ts', 'backend/tests/router.test.ts']);
+    assert.deepEqual(validatePatch(''), []);
+  });
+
+  it('rejects production paths, renames, deletions, modes, and binaries', () => {
+    assert.throws(() => validatePatch(newFile('backend/src/factory.ts')), /outside the test allowlist/);
+    assert.throws(() => validatePatch(newFile('.github/workflows/ci.test.ts')), /outside the test allowlist/);
+    assert.throws(() => validatePatch(`${newFile('backend/tests/a.test.ts')}\ndiff --git a/backend/tests/b.test.ts b/backend/tests/b.test.ts\ndeleted file mode 100644`), /deleted file mode/);
+    assert.throws(() => validatePatch('diff --git a/backend/tests/a.test.ts b/backend/tests/c.test.ts\nrename from backend/tests/a.test.ts'), /unexpected diff header|rename from/);
+    assert.throws(() => validatePatch(newFile('backend/tests/a.test.ts').replace('new file mode 100644', 'new file mode 120000')), /unexpected file mode/);
+    assert.throws(() => validatePatch(`${newFile('backend/tests/a.test.ts')}\nGIT binary patch`), /binary/);
+    assert.throws(() => validatePatch('--- /dev/null\n+++ b/backend/src/sneaky.ts\n@@ -0,0 +1 @@\n+x'), /without diff header/);
   });
 });
