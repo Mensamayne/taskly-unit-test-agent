@@ -157,7 +157,7 @@ export async function publish({ runDir, mode, repo, pr, workspace, runUrl, baseB
         note = `Opened ${url}.`;
       }
       // Record what the author job verified. CI also runs on the new commit when it was pushed with
-      // UNIT_TEST_AGENT_TOKEN; a GITHUB_TOKEN push starts no workflows, and then this status is all the commit has.
+      // UNIT_TEST_AGENT_PUSH_TOKEN; a GITHUB_TOKEN push gets no CI that runs by itself, and then this status is all the commit has.
       await gh(['api', '-X', 'POST', `repos/${repo}/statuses/${commitSha}`, '--input', '-'], {
         input: JSON.stringify({
           state: 'success',
