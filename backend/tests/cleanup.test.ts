@@ -17,7 +17,7 @@ describe('completedIds', () => {
     expect(completedIds([make(1, false), make(2, false)])).toEqual([]);
   });
 
-  it('orders ids oldest first regardless of input order', () => {
+  it('orders ids ascending regardless of input order', () => {
     expect(completedIds([make(10, true), make(2, true), make(7, true)])).toEqual([2, 7, 10]);
   });
 

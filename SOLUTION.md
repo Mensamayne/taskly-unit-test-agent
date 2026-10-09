@@ -42,7 +42,7 @@ preflight -> diff -> baseline (suites, coverage, tsc) -> plan
 Prerequisites:
 
 1. Repository secret `ANTHROPIC_API_KEY` (without it the author job skips generation; the publish job still posts a sticky PR comment explaining the skip).
-2. Optional secret `UNIT_TEST_AGENT_PUSH_TOKEN`: a fine-grained token for this repository with Contents and Pull requests set to "Read and write". The publish job checks it with a dry-run push and falls back to `GITHUB_TOKEN` with a warning if it cannot write, so a wrong token never loses the tests. The agent's commit is pushed with it so CI runs on that commit (runs started by a `GITHUB_TOKEN` push do not execute: GitHub either skips them or holds them as "action required"). The agent's own commit is recognized by its message and does not start another agent run.
+2. Optional secret `UNIT_TEST_AGENT_PUSH_TOKEN`: a fine-grained token for this repository with Contents and Pull requests set to "Read and write". The publish job checks it with a dry-run push and falls back to `GITHUB_TOKEN` with a warning if it cannot write, so a wrong token never loses the tests. The agent's commit is pushed with it so CI runs on that commit (runs started by a `GITHUB_TOKEN` push do not execute: GitHub either skips them or holds them as "action required"). The agent's own commit is recognized by its message and does not start another agent run. In this repository the token is configured and passes the write check, so CI (backend, frontend, harness) runs on every commit the agent pushes.
 3. Settings, Actions, General: allow GitHub Actions to create pull requests (bootstrap mode).
 4. Optional variables: `TEST_AGENT_MODE` (`commit` default, or `comment`), `TEST_AGENT_MODEL`.
 5. GitHub-hosted `ubuntu-latest` runners (Docker preinstalled).
@@ -112,6 +112,8 @@ PR #2 and PR #3 used the `external` driver with Claude Code as the author, befor
 - Static checks are regular expressions; a correctly named but wrong defect claim reaches the report (labeled unverified).
 - USD limits are checked between model turns, so a session can exceed its allowance by one turn.
 - Results are all or nothing per target; the PR comment shows the latest run only; targets per run are capped (8).
+- Not yet exercised with the real model: bootstrap mode in Actions (PR #2 used the `external` driver) and the repair loop (every real-model target so far passed on the first attempt; repairs are covered by the scripted-API tests).
+- The check that stops a run on the agent's own commit reads the commit message through the GitHub API; if that call fails, the run proceeds. It finds nothing new to test and commits nothing, so this costs one empty run, not a loop.
 
 ## What I would change for production
 
