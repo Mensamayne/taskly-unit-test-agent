@@ -72,7 +72,8 @@ before(() => {
   if (!dockerReady) return;
   TMP = mkdtempSync(join(tmpdir(), 'uta-docker-'));
   WT = join(TMP, 'wt');
-  assert.equal(spawnSync('docker', ['pull', '-q', loadConfig({}).sandboxImage], { stdio: 'ignore' }).status, 0, 'sandbox image pulls');
+  const pull = spawnSync('docker', ['pull', '-q', loadConfig({}).sandboxImage], { encoding: 'utf8' });
+  assert.equal(pull.status, 0, `sandbox image pulls: ${pull.error?.message ?? ''} ${pull.stderr ?? ''}`);
   git(['worktree', 'add', '--detach', WT, 'HEAD'], REPO);
   // Real copies: the container sees only the worktree, and Vite writes into node_modules.
   for (const side of ['backend', 'frontend']) {
