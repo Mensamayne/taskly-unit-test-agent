@@ -128,9 +128,9 @@ jobs:
 
   publish:
     needs: author
-    if: >-
-      always() && needs.author.result != 'skipped' && needs.author.result != 'cancelled' &&
-      needs.author.outputs.skipped != 'true'
+    # Run when the author job ran (including "skipped for missing key") so the PR still gets a sticky comment.
+    # Do not run when the author job itself was skipped (draft / fork) or cancelled.
+    if: always() && needs.author.result != 'skipped' && needs.author.result != 'cancelled'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -167,8 +167,10 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           HAS_RUN: ${{ steps.download.outcome == 'success' }}
+          AUTHOR_SKIPPED: ${{ needs.author.outputs.skipped }}
         run: |
           args=(--mode "$MODE" --repo "$GITHUB_REPOSITORY" --workspace ws --run-url "$RUN_URL" --base "$BASE_REF")
           [ -n "$PR" ] && args+=(--pr "$PR")
           [ "$HAS_RUN" = "true" ] && args+=(--run run)
+          [ "$AUTHOR_SKIPPED" = "true" ] && args+=(--skip-reason missing_api_key)
           node trusted/agent/src/publish.mjs "${args[@]}"

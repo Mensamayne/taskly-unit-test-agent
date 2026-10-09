@@ -8,10 +8,11 @@ import { formatRanges, loadLineCoverage, uncoveredLines } from '../src/coverage.
 import { checkRead, checkWrite, evaluateToolUse, isWritablePath, toRepoRelative } from '../src/guard.mjs';
 import { parseAddedLines } from '../src/lib/git.mjs';
 import { renderTaskPacket, validateResult } from '../src/packet.mjs';
-import { planBootstrap, planPullRequest, testPathFor } from '../src/plan.mjs';
+import { planBootstrap, planPullRequest, sourceForTestPath, testPathFor } from '../src/plan.mjs';
 import { renderReport, verificationLine } from '../src/report.mjs';
 import { expectStatus, nextStep } from '../src/state.mjs';
 import { blocksWithoutExpect, extractTitles, findDisallowedMarkers, importSpecifiers, removedAssertionLines, unstubbedRandomness } from '../src/testfile.mjs';
+import { safeEnv } from '../src/lib/exec.mjs';
 import { classifyFailure, explainFailure } from '../src/runner.mjs';
 import { matchedDefectClaims } from '../src/pipeline.mjs';
 
@@ -209,6 +210,44 @@ describe('plan', () => {
     assert.match(noops[0].reason, /over the target limit/);
   });
 
+  it('maps a failing test file back to its covered source', () => {
+    assert.deepEqual(sourceForTestPath('backend/tests/router.test.ts', baseline), {
+      path: 'backend/src/features/todos/router.ts',
+      side: 'backend',
+    });
+    assert.equal(sourceForTestPath('backend/tests/missing.test.ts', baseline), null);
+  });
+
+  it('plans collateral repairs for failing tests outside the changed sources', () => {
+    const files = [{ status: 'M', path: 'backend/src/features/todos/stats.ts' }];
+    const added = new Map([['backend/src/features/todos/stats.ts', [1, 2, 3]]]);
+    const collateral = {
+      backend: {
+        coverage: baseline.backend.coverage,
+        failingFiles: new Set(['backend/tests/stats.test.ts', 'backend/tests/router.test.ts']),
+      },
+    };
+    const existsAll = (p) =>
+      [
+        'backend/tests/stats.test.ts',
+        'backend/tests/router.test.ts',
+        'backend/tests/validators.test.ts',
+        'backend/tests/old.test.ts',
+      ].includes(p);
+    const { targets } = planPullRequest({ files, added, baseline: collateral, exists: existsAll, maxTargets: 8 });
+    const byTest = Object.fromEntries(targets.map((t) => [t.testPath, t]));
+    assert.equal(byTest['backend/tests/stats.test.ts'].action, 'repair-existing');
+    assert.equal(byTest['backend/tests/stats.test.ts'].path, 'backend/src/features/todos/stats.ts');
+    assert.equal(byTest['backend/tests/router.test.ts'].action, 'repair-existing');
+    assert.equal(byTest['backend/tests/router.test.ts'].path, 'backend/src/features/todos/router.ts');
+    assert.match(byTest['backend/tests/router.test.ts'].reason, /collateral/);
+    assert.ok(
+      targets.findIndex((t) => t.testPath === 'backend/tests/stats.test.ts') <
+        targets.findIndex((t) => t.testPath === 'backend/tests/router.test.ts'),
+      'direct repair of the changed source comes before collateral',
+    );
+  });
+
   it('bootstraps files below the threshold, honoring the skip list', () => {
     const { targets, noops } = planBootstrap({ baseline, exists, maxTargets: 8, threshold: 80, skip: ['backend/src/features/todos/stats.ts'] });
     assert.deepEqual(targets.map((t) => t.path).sort(), ['backend/src/features/todos/router.ts', 'backend/src/features/todos/validators.ts']);
@@ -318,7 +357,14 @@ describe('report', () => {
 });
 
 describe('publish patch validation', async () => {
-  const { validatePatch } = await import('../src/publish.mjs');
+  const { noRunNotice, validatePatch } = await import('../src/publish.mjs');
+
+  it('explains a missing API key when the author job skipped', () => {
+    const body = noRunNotice('missing_api_key', 'https://example.test/run');
+    assert.match(body, /ANTHROPIC_API_KEY/);
+    assert.match(body, /uta run --author external/);
+    assert.match(noRunNotice(undefined, 'https://example.test/run'), /did not produce a result/);
+  });
   const newFile = (path) => [
     `diff --git a/${path} b/${path}`,
     'new file mode 100644',
@@ -349,6 +395,27 @@ describe('publish patch validation', async () => {
 });
 
 describe('edge cases', () => {
+  it('scrubs secrets from the env passed to repository code', () => {
+    const env = safeEnv(
+      { EXTRA: 'ok' },
+      {
+        PATH: '/bin',
+        ANTHROPIC_API_KEY: 'sk-ant-secret',
+        GITHUB_TOKEN: 'ghp_secret',
+        GH_TOKEN: 'gh_secret',
+        OPENAI_API_KEY: 'sk-openai',
+        HOME: '/home/uta',
+      },
+    );
+    assert.equal(env.PATH, '/bin');
+    assert.equal(env.HOME, '/home/uta');
+    assert.equal(env.EXTRA, 'ok');
+    assert.equal(env.CI, 'true');
+    for (const key of ['ANTHROPIC_API_KEY', 'GITHUB_TOKEN', 'GH_TOKEN', 'OPENAI_API_KEY']) {
+      assert.equal(env[key], undefined, key);
+    }
+  });
+
   it('rejects unstubbed randomness but allows stubbed', () => {
     assert.deepEqual(unstubbedRandomness('expect(Math.random()).toBeLessThan(1)'), ['Math.random()']);
     assert.deepEqual(unstubbedRandomness("vi.spyOn(Math, 'random').mockReturnValue(0.1); f(Math.random())"), []);

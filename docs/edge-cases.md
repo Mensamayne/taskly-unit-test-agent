@@ -61,7 +61,7 @@ USD limits are checked between turns, so a session can exceed its allowance by o
 
 ## Comparison with other unit-test agents
 
-Read from their source code.
+Read from their source code (CoverUp, ai-git-bot, unit-test-agent-4j, python-unit-test-agent, agentic-unit-test-generator, and CI sandbox patterns from Airut / GitHub Agentic Workflows).
 
 | Problem | CoverUp | ai-git-bot | unit-test-agent-4j | This harness |
 |---------|---------|------------|--------------------|--------------|
@@ -72,3 +72,15 @@ Read from their source code.
 | Endless repair | `--max-attempts` | Retry budget | Per-test cap, stagnation detection | Max 2 repairs, no-progress stop |
 | Path traversal | n/a | Guard does not normalize `..` | Project-root sandbox | Normalized hook, segment check on raw patch paths |
 | Missing dependency | Optionally installs it | n/a | Dependency failure type | Rejected at G2, never installed |
+| PR breaks other tests | n/a (not a PR bot) | Path/write focus on changed files | n/a | Collateral `repair-existing` for failing test files outside the diff |
+| New file never imported | Appears via coverage tooling | n/a | Project scan | Baseline uses `--coverage.all` so unused modules stay in the map |
+| Secrets in test process | Docker recommended | Self-hosted gateway | Env-based keys | Child Vitest/tsc get an allowlisted env; Docker runs `--network none` |
+| Agent config from PR | n/a | Bot config server-side | Local CLI | Harness and `.claude/` always checked out from the base branch |
+
+### Peer anti-patterns we refuse
+
+- Auto-install packages the model asks for (CoverUp optional `pip install`)
+- Disable or rename failing tests to force a green suite (CoverUp `--disable-polluting`)
+- Soft-succeed a CI job when nothing was generated (claude-test-writer Action)
+- Repair budgets that exist only in the prompt, not in the host loop
+- Persist API keys to disk (`--save` style configs)

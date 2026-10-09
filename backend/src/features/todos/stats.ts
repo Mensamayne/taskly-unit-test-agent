@@ -1,3 +1,4 @@
+import { isDueToday, isOverdue } from './dueLabel.js';
 import type { Todo } from './types.js';
 
 export interface TodoStats {
@@ -6,6 +7,8 @@ export interface TodoStats {
   active: number;
   /** Active tasks whose due date is before `today`. Completed tasks are never overdue. */
   overdue: number;
+  /** Active tasks due exactly on `today`. */
+  dueToday: number;
 }
 
 /**
@@ -18,6 +21,7 @@ export function computeStats(todos: Todo[], today: string): TodoStats {
     total: todos.length,
     completed,
     active: todos.length - completed,
-    overdue: todos.filter((todo) => !todo.completed && todo.due_date !== null && todo.due_date < today).length,
+    overdue: todos.filter((todo) => isOverdue(todo.due_date, today, todo.completed)).length,
+    dueToday: todos.filter((todo) => !todo.completed && isDueToday(todo.due_date, today)).length,
   };
 }

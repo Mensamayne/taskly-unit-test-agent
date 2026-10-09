@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { formatDate, isOverdue, selectTodos, validateTodo } from './todos'
+import {
+  formatDate,
+  isDueToday,
+  isOverdue,
+  selectTodos,
+  validateTodo,
+} from './todos'
 import type { Todo, TodoInput } from '../types'
 
 const base: Todo = {
@@ -140,6 +146,30 @@ describe('isOverdue', () => {
       isOverdue({ ...base, completed: true, due_date: '2026-10-01' }),
     ).toBe(false)
     expect(isOverdue({ ...base, due_date: null })).toBe(false)
+  })
+})
+
+describe('isDueToday', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 9, 15, 12, 0, 0))
+  })
+  afterEach(() => vi.useRealTimers())
+
+  it('flags an active task due on the local calendar day', () => {
+    expect(isDueToday({ ...base, due_date: '2026-10-15' })).toBe(true)
+  })
+
+  it('does not flag tasks due on other days', () => {
+    expect(isDueToday({ ...base, due_date: '2026-10-14' })).toBe(false)
+    expect(isDueToday({ ...base, due_date: '2026-10-16' })).toBe(false)
+  })
+
+  it('never flags completed or undated tasks', () => {
+    expect(
+      isDueToday({ ...base, completed: true, due_date: '2026-10-15' }),
+    ).toBe(false)
+    expect(isDueToday({ ...base, due_date: null })).toBe(false)
   })
 })
 

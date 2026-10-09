@@ -6,7 +6,7 @@ import { HarnessError } from './lib/errors.mjs';
 import { runCommand } from './lib/exec.mjs';
 import { addedLines, changedFiles, commitAuthorEmail, fileDiff, resolveCommit, statusEntries } from './lib/git.mjs';
 import { renderTaskPacket, validateResult } from './packet.mjs';
-import { isTestFile, planBootstrap, planPullRequest } from './plan.mjs';
+import { isTestFile, planBootstrap, planPullRequest, sideOf } from './plan.mjs';
 import { writeReport } from './report.mjs';
 import { runTsc, runVitest, tscKey } from './runner.mjs';
 import { ensureDir } from './sandbox.mjs';
@@ -132,7 +132,22 @@ export async function startRun({ root, mode, base, head = 'HEAD', sides, driver,
   if (mode === 'pr') {
     // The author sees what changed, not only which lines: it decides whether an old assertion
     // is outdated by the change (repair-existing) or the change is a bug (suspected defect).
-    for (const t of state.targets) t.diff = await fileDiff(root, pre.baseSha, pre.headSha, t.path);
+    // Collateral repairs target a source that may not itself be in the diff; show the PR changes
+    // on the same side so the author can tell which assertions the pull request explains.
+    const relatedBySide = { frontend: [], backend: [] };
+    for (const f of files) {
+      const side = sideOf(f.path);
+      if (!side || isTestFile(f.path) || f.status === 'D') continue;
+      const body = await fileDiff(root, pre.baseSha, pre.headSha, f.path);
+      if (body) relatedBySide[side].push(`# ${f.path}\n${body}`);
+    }
+    for (const t of state.targets) {
+      t.diff = await fileDiff(root, pre.baseSha, pre.headSha, t.path);
+      if (!t.diff && relatedBySide[t.side]?.length) {
+        const combined = relatedBySide[t.side].join('\n\n');
+        t.diff = combined.length > 6000 ? `${combined.slice(0, 6000)}\n[diff truncated]` : combined;
+      }
+    }
   }
   state.stage = 'authoring';
   saveRun(root, state);

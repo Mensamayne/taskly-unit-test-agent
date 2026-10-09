@@ -90,15 +90,27 @@ function commitMessage(run, paths) {
 }
 
 /**
- * @param {{ runDir: string | null, mode: 'commit' | 'comment', repo: string, pr: string | null,
- *           workspace: string, runUrl: string, baseBranch: string }} opts
+ * Sticky comment when the author job produced no run directory.
+ * @param {string | undefined} skipReason
+ * @param {string} runUrl
  */
-export async function publish({ runDir, mode, repo, pr, workspace, runUrl, baseBranch, local = false }) {
+export function noRunNotice(skipReason, runUrl) {
+  if (skipReason === 'missing_api_key') {
+    return `${COMMENT_MARKER}\n### Unit test agent\n\nSkipped: the \`ANTHROPIC_API_KEY\` secret is not configured. The harness can still be run locally with \`uta run --author external\`. See the workflow run: ${runUrl}\n`;
+  }
+  return `${COMMENT_MARKER}\n### Unit test agent\n\nThe agent run did not produce a result. See the workflow run: ${runUrl}\n`;
+}
+
+/**
+ * @param {{ runDir: string | null, mode: 'commit' | 'comment', repo: string, pr: string | null,
+ *           workspace: string, runUrl: string, baseBranch: string, skipReason?: string }} opts
+ */
+export async function publish({ runDir, mode, repo, pr, workspace, runUrl, baseBranch, local = false, skipReason }) {
   identity = local ? null : BOT;
   if (!runDir || !existsSync(join(runDir, 'run.json'))) {
-    const body = `${COMMENT_MARKER}\n### Unit test agent\n\nThe agent run did not produce a result. See the workflow run: ${runUrl}\n`;
+    const body = noRunNotice(skipReason, runUrl);
     if (pr) await upsertComment(repo, pr, body);
-    return { published: 'failure-notice' };
+    return { published: 'failure-notice', skipReason: skipReason ?? null };
   }
   const run = JSON.parse(readFileSync(join(runDir, 'run.json'), 'utf8'));
   const report = readFileSync(join(runDir, 'report.md'), 'utf8');
@@ -117,7 +129,13 @@ export async function publish({ runDir, mode, repo, pr, workspace, runUrl, baseB
     note = `Tests were not committed because the final verification did not pass. The patch is ${patchLocation}.`;
   } else {
     if (pr) {
-      const head = (await gh(['api', `repos/${repo}/pulls/${pr}`, '--jq', '.head.sha'])).trim();
+      // The pulls API can lag a push of the same branch for a moment (local dogfood, fast CI).
+      // Retry before treating a mismatch as "the PR moved".
+      let head = (await gh(['api', `repos/${repo}/pulls/${pr}`, '--jq', '.head.sha'])).trim();
+      if (head !== run.head) {
+        await new Promise((r) => setTimeout(r, 2000));
+        head = (await gh(['api', `repos/${repo}/pulls/${pr}`, '--jq', '.head.sha'])).trim();
+      }
       if (head !== run.head) {
         note = `Tests were not committed: the pull request moved from ${run.head.slice(0, 7)} to ${head.slice(0, 7)} during the run. A new run is triggered by the push.`;
       }
@@ -167,6 +185,7 @@ async function main() {
     runUrl: args['run-url'] ?? '',
     baseBranch: args.base ?? 'main',
     local: args.identity === 'local',
+    skipReason: args['skip-reason'] && args['skip-reason'] !== 'true' ? args['skip-reason'] : undefined,
   });
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   if (process.env.GITHUB_STEP_SUMMARY && result.note) {

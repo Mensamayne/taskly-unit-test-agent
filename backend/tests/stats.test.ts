@@ -8,7 +8,13 @@ const task = (overrides: Partial<Todo>): Todo => ({ ...todo, ...overrides });
 
 describe('computeStats', () => {
   it('returns zero counts for an empty list', () => {
-    expect(computeStats([], today)).toEqual({ total: 0, completed: 0, active: 0, overdue: 0 });
+    expect(computeStats([], today)).toEqual({
+      total: 0,
+      completed: 0,
+      active: 0,
+      overdue: 0,
+      dueToday: 0,
+    });
   });
 
   it('splits tasks into completed and active', () => {
@@ -28,6 +34,21 @@ describe('computeStats', () => {
 
   it('never counts completed tasks as overdue', () => {
     const todos = [task({ id: 1, due_date: '2026-10-01', completed: true }), task({ id: 2, due_date: '2026-10-01' })];
-    expect(computeStats(todos, today)).toEqual({ total: 2, completed: 1, active: 1, overdue: 1 });
+    expect(computeStats(todos, today)).toEqual({
+      total: 2,
+      completed: 1,
+      active: 1,
+      overdue: 1,
+      dueToday: 0,
+    });
+  });
+
+  it('counts active tasks due today', () => {
+    const todos = [
+      task({ id: 1, due_date: today }),
+      task({ id: 2, due_date: today, completed: true }),
+      task({ id: 3, due_date: '2026-10-16' }),
+    ];
+    expect(computeStats(todos, today).dueToday).toBe(1);
   });
 });

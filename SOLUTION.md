@@ -15,7 +15,7 @@ A custom agent that writes and updates Vitest unit tests for the Taskly backend 
 | Backend | 33.0% (48 tests) | 97.4% (96 tests) |
 | Frontend | 47.7% (18 tests) | 97.6% (97 tests) |
 
-Pull requests: [#1 harness](https://github.com/Mensamayne/taskly-unit-test-agent/pull/1), [#2 bootstrap tests](https://github.com/Mensamayne/taskly-unit-test-agent/pull/2), [#3 example feature](https://github.com/Mensamayne/taskly-unit-test-agent/pull/3), [#6](https://github.com/Mensamayne/taskly-unit-test-agent/pull/6) and [#7](https://github.com/Mensamayne/taskly-unit-test-agent/pull/7) hardening and verification.
+Pull requests: [#1 harness](https://github.com/Mensamayne/taskly-unit-test-agent/pull/1), [#2 bootstrap tests](https://github.com/Mensamayne/taskly-unit-test-agent/pull/2), [#3 example feature](https://github.com/Mensamayne/taskly-unit-test-agent/pull/3), [#6](https://github.com/Mensamayne/taskly-unit-test-agent/pull/6) and [#7](https://github.com/Mensamayne/taskly-unit-test-agent/pull/7) hardening and verification, [#11](https://github.com/Mensamayne/taskly-unit-test-agent/pull/11) external-author dogfood (repair, write, update, publish, Actions skip notice).
 
 ## Main technical decisions
 
@@ -27,7 +27,7 @@ preflight -> diff -> baseline (suites, coverage, tsc) -> plan
   -> final suites -> report, test-only patch -> publish to the PR
 ```
 
-**"When appropriate" is decided from data.** Per changed file, from the diff and the baseline coverage of the project's own Vitest config: `noop` (outside the coverage scope, or changed lines already covered), `repair-existing` (the PR broke its tests), `write` (no test file, or a new file), `update` (uncovered changed lines).
+**"When appropriate" is decided from data.** Per changed file, from the diff and the baseline coverage of the project's own Vitest config (`--coverage.all` so new modules that no test imports yet still appear): `noop` (outside the coverage scope, or changed lines already covered), `repair-existing` (the PR broke its tests), `write` (no test file, or a new file), `update` (uncovered changed lines). Failing tests whose source was not in the diff still get a collateral `repair-existing` target, so the final suite can go green.
 
 **Nothing the author claims is trusted.** The host runs acceptance gates on every result: no resubmitted failure (G0), only the target's test file changed (G1), static checks such as no `.only`/`.skip`, assertions in every test, no removed tests, no new dependencies, no unstubbed randomness (G2), no new `tsc` errors (G3), passes (G4), covers target lines (G6), passes three times in shuffled order (G5), full suite still green (G7). After every test run the worktree is checked again; side effects are reverted and fail the target. This is the TestGen-LLM / CoverUp filter: builds, passes, passes repeatedly, adds coverage. A failing assertion the author attributes to a source bug is dropped and reported as a suspected defect, never "repaired" into passing.
 
@@ -41,7 +41,7 @@ preflight -> diff -> baseline (suites, coverage, tsc) -> plan
 
 Prerequisites:
 
-1. Repository secret `ANTHROPIC_API_KEY` (without it the workflow skips the agent with a notice).
+1. Repository secret `ANTHROPIC_API_KEY` (without it the author job skips generation; the publish job still posts a sticky PR comment explaining the skip).
 2. Settings, Actions, General: allow GitHub Actions to create pull requests (bootstrap mode).
 3. Optional variables: `TEST_AGENT_MODE` (`commit` default, or `comment`), `TEST_AGENT_MODEL`.
 4. GitHub-hosted `ubuntu-latest` runners (Docker preinstalled).
@@ -91,7 +91,7 @@ These runs used the `external` driver with Claude Code as the author, because th
 
 ## Limitations
 
-- No run with the real model yet: the SDK wiring is verified, the quality of model-written tests is not. The Docker sandbox runs on Linux only.
+- No Actions run with the real model yet when the repository secret is unset: the SDK wiring is verified locally against a scripted API, and the full PR path is dogfooded with `--author external`. The Docker sandbox runs on Linux only.
 - Commits pushed with `GITHUB_TOKEN` do not retrigger CI; the publisher sets a commit status from the verified run instead.
 - Coverage is a proxy: changed lines that existing tests execute are a `noop` even if the new behavior is not asserted. Gains are measured on lines, not branches.
 - Static checks are regular expressions; a correctly named but wrong defect claim reaches the report (labeled unverified).
