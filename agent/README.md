@@ -12,7 +12,7 @@ preflight -> collect diff -> baseline (suites, coverage, tsc) -> plan
 
 | Driver | Use |
 |--------|-----|
-| `sdk` | Claude Agent SDK session per target with the custom agent `.claude/agents/unit-test-author.md` and the skills in `.claude/skills/`. Repairs resume the same session. Default in CI. Needs `ANTHROPIC_API_KEY`. |
+| `sdk` | Claude Agent SDK session per target with the custom agent `.claude/agents/unit-test-author.md` and the skills in `.claude/skills/`. Repairs resume the same session. Default in CI. Needs `ANTHROPIC_API_KEY` (`ANTHROPIC_BASE_URL` is forwarded for gateways). The agent process gets an isolated home directory. |
 | `external` | The run stops at every target and hands the task packet to whoever runs the CLI (a person, Cursor, Claude Code). Refused when `CI=true`. |
 | `stub` | Replays recorded author output from a JSON script. Used by the harness tests. |
 
@@ -89,7 +89,11 @@ Read from the environment and clamped to hard maximums in `src/config.mjs`: `UTA
 cd agent && npm test
 ```
 
-Unit tests for planning, guards, static checks, packets, and reporting, plus end-to-end runs of the CLI against a disposable git worktree with real Vitest and tsc.
+Unit tests for planning, guards, static checks, packets, and reporting, plus end-to-end runs of the CLI against a disposable git worktree with real Vitest and tsc:
+
+- `e2e.test.mjs`: stub and external drivers, repairs, scope violations, side effects, author failures
+- `sdk.e2e.test.mjs`: the real Agent SDK and Claude Code process against a scripted Messages API (`test/support/fake-anthropic.mjs`)
+- `docker.e2e.test.mjs`: the Docker sandbox, including a hanging test and its container (Linux with Docker; skipped elsewhere)
 
 ## Removing the harness
 
