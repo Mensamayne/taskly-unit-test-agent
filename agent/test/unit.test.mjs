@@ -8,7 +8,7 @@ import { formatRanges, loadLineCoverage, uncoveredLines } from '../src/coverage.
 import { checkRead, checkWrite, evaluateToolUse, isWritablePath, toRepoRelative } from '../src/guard.mjs';
 import { parseAddedLines } from '../src/lib/git.mjs';
 import { renderTaskPacket, validateResult } from '../src/packet.mjs';
-import { planBootstrap, planPullRequest, testPathFor } from '../src/plan.mjs';
+import { planBootstrap, planPullRequest, sourceForTestPath, testPathFor } from '../src/plan.mjs';
 import { renderReport, verificationLine } from '../src/report.mjs';
 import { expectStatus, nextStep } from '../src/state.mjs';
 import { blocksWithoutExpect, extractTitles, findDisallowedMarkers, importSpecifiers, removedAssertionLines, unstubbedRandomness } from '../src/testfile.mjs';
@@ -207,6 +207,44 @@ describe('plan', () => {
     const { targets, noops } = planPullRequest({ files, added, baseline: { backend: { ...baseline.backend, failingFiles: new Set() } }, exists, maxTargets: 1 });
     assert.deepEqual(targets.map((t) => t.path), ['backend/src/features/todos/stats.ts']);
     assert.match(noops[0].reason, /over the target limit/);
+  });
+
+  it('maps a failing test file back to its covered source', () => {
+    assert.deepEqual(sourceForTestPath('backend/tests/router.test.ts', baseline), {
+      path: 'backend/src/features/todos/router.ts',
+      side: 'backend',
+    });
+    assert.equal(sourceForTestPath('backend/tests/missing.test.ts', baseline), null);
+  });
+
+  it('plans collateral repairs for failing tests outside the changed sources', () => {
+    const files = [{ status: 'M', path: 'backend/src/features/todos/stats.ts' }];
+    const added = new Map([['backend/src/features/todos/stats.ts', [1, 2, 3]]]);
+    const collateral = {
+      backend: {
+        coverage: baseline.backend.coverage,
+        failingFiles: new Set(['backend/tests/stats.test.ts', 'backend/tests/router.test.ts']),
+      },
+    };
+    const existsAll = (p) =>
+      [
+        'backend/tests/stats.test.ts',
+        'backend/tests/router.test.ts',
+        'backend/tests/validators.test.ts',
+        'backend/tests/old.test.ts',
+      ].includes(p);
+    const { targets } = planPullRequest({ files, added, baseline: collateral, exists: existsAll, maxTargets: 8 });
+    const byTest = Object.fromEntries(targets.map((t) => [t.testPath, t]));
+    assert.equal(byTest['backend/tests/stats.test.ts'].action, 'repair-existing');
+    assert.equal(byTest['backend/tests/stats.test.ts'].path, 'backend/src/features/todos/stats.ts');
+    assert.equal(byTest['backend/tests/router.test.ts'].action, 'repair-existing');
+    assert.equal(byTest['backend/tests/router.test.ts'].path, 'backend/src/features/todos/router.ts');
+    assert.match(byTest['backend/tests/router.test.ts'].reason, /collateral/);
+    assert.ok(
+      targets.findIndex((t) => t.testPath === 'backend/tests/stats.test.ts') <
+        targets.findIndex((t) => t.testPath === 'backend/tests/router.test.ts'),
+      'direct repair of the changed source comes before collateral',
+    );
   });
 
   it('bootstraps files below the threshold, honoring the skip list', () => {

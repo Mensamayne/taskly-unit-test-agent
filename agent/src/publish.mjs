@@ -117,7 +117,13 @@ export async function publish({ runDir, mode, repo, pr, workspace, runUrl, baseB
     note = `Tests were not committed because the final verification did not pass. The patch is ${patchLocation}.`;
   } else {
     if (pr) {
-      const head = (await gh(['api', `repos/${repo}/pulls/${pr}`, '--jq', '.head.sha'])).trim();
+      // The pulls API can lag a push of the same branch for a moment (local dogfood, fast CI).
+      // Retry before treating a mismatch as "the PR moved".
+      let head = (await gh(['api', `repos/${repo}/pulls/${pr}`, '--jq', '.head.sha'])).trim();
+      if (head !== run.head) {
+        await new Promise((r) => setTimeout(r, 2000));
+        head = (await gh(['api', `repos/${repo}/pulls/${pr}`, '--jq', '.head.sha'])).trim();
+      }
       if (head !== run.head) {
         note = `Tests were not committed: the pull request moved from ${run.head.slice(0, 7)} to ${head.slice(0, 7)} during the run. A new run is triggered by the push.`;
       }

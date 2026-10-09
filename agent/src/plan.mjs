@@ -63,6 +63,66 @@ function actionFor(testPath, failingFiles, exists) {
 }
 
 /**
+ * Map a conventional test file back to its source using the coverage scope.
+ * Backend tests are flat, so the file name alone is not enough.
+ * @param {string} testPath
+ * @param {Partial<Record<Side, SideBaseline>>} baseline
+ * @returns {{ path: string, side: Side } | null}
+ */
+export function sourceForTestPath(testPath, baseline) {
+  for (const [side, data] of Object.entries(baseline)) {
+    if (!data?.coverage) continue;
+    for (const path of data.coverage.keys()) {
+      if (testPathFor(path) === testPath) return { path, side: /** @type {Side} */ (side) };
+    }
+  }
+  return null;
+}
+
+/**
+ * Failing tests whose source was not in the PR diff still need an author.
+ * Without this, G7 treats them as known and the final report stays "Tests failed".
+ * @param {Omit<PlannedTarget, 'id'>[]} candidates
+ * @param {PlannedNoop[]} noops
+ * @param {Partial<Record<Side, SideBaseline>>} baseline
+ * @param {Map<string, number[]>} added
+ * @param {(repoRelPath: string) => boolean} exists
+ */
+function addCollateralRepairs(candidates, noops, baseline, added, exists) {
+  const claimed = new Set(candidates.map((c) => c.testPath));
+  for (const data of Object.values(baseline)) {
+    if (!data?.failingFiles) continue;
+    for (const testPath of data.failingFiles) {
+      if (claimed.has(testPath)) continue;
+      if (!exists(testPath)) continue;
+      const src = sourceForTestPath(testPath, baseline);
+      if (!src) {
+        noops.push({ path: testPath, reason: 'failing test file has no source in the coverage scope' });
+        continue;
+      }
+      const cov = baseline[src.side]?.coverage.get(src.path);
+      if (!cov) {
+        noops.push({ path: testPath, reason: 'failing test file has no source in the coverage scope' });
+        continue;
+      }
+      const changed = (added.get(src.path) ?? []).filter((l) => cov.executable.has(l));
+      candidates.push({
+        path: src.path,
+        side: src.side,
+        action: 'repair-existing',
+        reason: 'existing tests fail on the head commit (collateral to changes in this pull request)',
+        testPath,
+        changedLines: changed,
+        linesToCover: changed.filter((l) => !cov.covered.has(l)),
+        // Below direct repairs of changed sources (1_000_000), above ordinary coverage work.
+        priority: 900_000,
+      });
+      claimed.add(testPath);
+    }
+  }
+}
+
+/**
  * Pull request mode: decide per changed file from the diff and the baseline coverage.
  * The LLM is never asked whether a file needs tests.
  * @param {{
@@ -124,6 +184,7 @@ export function planPullRequest({ files, added, baseline, exists, maxTargets }) 
     }
     candidates.push({ path, side, action, reason, testPath, changedLines: changed, linesToCover: uncovered, priority: uncovered.length });
   }
+  addCollateralRepairs(candidates, noops, baseline, added, exists);
   return finalize(candidates, noops, maxTargets);
 }
 
