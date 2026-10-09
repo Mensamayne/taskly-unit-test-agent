@@ -1,229 +1,109 @@
 # Solution: unit-test agent for Taskly
 
-A custom agent that writes and updates unit tests for Taskly, runs them, and reports on GitHub pull requests. It covers the backend (Express, Prisma, zod) and the frontend (React, TanStack Query), both on Vitest.
+A custom agent that writes and updates Vitest unit tests for the Taskly backend and frontend, verifies them by running them, and reports on GitHub pull requests.
 
 | Piece | Location |
 |-------|----------|
 | Custom agents | `.claude/agents/unit-test-author.md`, `.claude/agents/test-reviewer.md` |
-| Reusable skills | `.claude/skills/` (five skills, below) |
-| Harness: pipeline, gates, CLI, publisher | `agent/` (see `agent/README.md`) |
+| Reusable skills | `.claude/skills/` |
+| Harness (pipeline, gates, CLI, publisher) | `agent/`, see [`agent/README.md`](agent/README.md) |
 | PR workflow | `.github/workflows/unit-test-agent.yml` |
-| Regular CI | `.github/workflows/ci.yml` |
+| Edge cases and comparison with other agents | [`docs/edge-cases.md`](docs/edge-cases.md) |
 
-Results on this repository:
+| Line coverage | Before | After |
+|---------------|--------|-------|
+| Backend | 33.0% (48 tests) | 97.4% (96 tests) |
+| Frontend | 47.7% (18 tests) | 97.6% (97 tests) |
 
-| | Before | After |
-|-|--------|-------|
-| Backend line coverage | 33.0% (48 tests) | 97.4% (96 tests) |
-| Frontend line coverage | 47.7% (18 tests) | 97.6% (97 tests) |
-
-Pull requests: [#1 harness](https://github.com/Mensamayne/taskly-unit-test-agent/pull/1), [#2 bootstrap tests](https://github.com/Mensamayne/taskly-unit-test-agent/pull/2), [#3 example feature with the agent's results](https://github.com/Mensamayne/taskly-unit-test-agent/pull/3), [#4 harness fixture fix](https://github.com/Mensamayne/taskly-unit-test-agent/pull/4).
+Pull requests: [#1 harness](https://github.com/Mensamayne/taskly-unit-test-agent/pull/1), [#2 bootstrap tests](https://github.com/Mensamayne/taskly-unit-test-agent/pull/2), [#3 example feature](https://github.com/Mensamayne/taskly-unit-test-agent/pull/3), [#6](https://github.com/Mensamayne/taskly-unit-test-agent/pull/6) and [#7](https://github.com/Mensamayne/taskly-unit-test-agent/pull/7) hardening and verification.
 
 ## Main technical decisions
 
-**A fixed pipeline with one agentic step.** The agent does not roam the repository. A deterministic Node pipeline does everything that can be computed, and the model fills only the step that needs judgment: writing the test.
+**A fixed pipeline with one agentic step.** A deterministic Node pipeline does everything that can be computed; the model only writes the test. A pipeline can guarantee scope, budgets, and verification; a free agent loop can only be asked to.
 
 ```
 preflight -> diff -> baseline (suites, coverage, tsc) -> plan
-  -> per target: author -> gates G1..G7 -> repair (max 2) -> accepted | rejected
+  -> per target: author -> gates G0..G7 -> repair (max 2) -> accepted | rejected
   -> final suites -> report, test-only patch -> publish to the PR
 ```
 
-Rationale: the brief weighs security, reliability, and correct results. A pipeline can guarantee scope, budgets, and verification; a free agent loop can only be asked to.
+**"When appropriate" is decided from data.** Per changed file, from the diff and the baseline coverage of the project's own Vitest config: `noop` (outside the coverage scope, or changed lines already covered), `repair-existing` (the PR broke its tests), `write` (no test file, or a new file), `update` (uncovered changed lines).
 
-**"When appropriate" is decided from data, not by the model.** For each changed file the planner reads the diff (changed line numbers) and the baseline coverage of the project's own Vitest configuration:
+**Nothing the author claims is trusted.** The host runs acceptance gates on every result: no resubmitted failure (G0), only the target's test file changed (G1), static checks such as no `.only`/`.skip`, assertions in every test, no removed tests, no new dependencies, no unstubbed randomness (G2), no new `tsc` errors (G3), passes (G4), covers target lines (G6), passes three times in shuffled order (G5), full suite still green (G7). After every test run the worktree is checked again; side effects are reverted and fail the target. This is the TestGen-LLM / CoverUp filter: builds, passes, passes repeatedly, adds coverage. A failing assertion the author attributes to a source bug is dropped and reported as a suspected defect, never "repaired" into passing.
 
-| Situation | Decision |
-|-----------|----------|
-| Not in the coverage scope (types, styles, re-exports, design system) | `noop` |
-| Existing tests for the file fail on the PR head | `repair-existing` |
-| New file without its own test file | `write` |
-| Changed lines not covered by passing tests | `update` or `write` |
-| Changed lines already covered | `noop` |
+**Replaceable author.** `sdk` (Claude Agent SDK, default in CI), `external` (the CLI hands the same task packet to a person or another agent; refused in CI), `stub` (recorded output for tests). Same prompt, tools, budgets, and gates for all three.
 
-**Nothing the author claims is trusted.** Every result goes through acceptance gates run by the host:
+**Least privilege.** The `author` job has the model key and a read-only token; every Vitest and `tsc` run happens in a Docker container without network or secrets; the harness and `.claude/` come from the base branch, so a PR cannot change the agent that reviews it. The `publish` job has a write token, never runs repository code, re-validates the test-only patch, checks the PR head did not move, commits, and keeps one updated PR comment.
 
-| Gate | Check |
-|------|-------|
-| G0 progress | A file identical to one that already failed is rejected without running |
-| G1 scope | Only the target's test file changed anywhere in the worktree. Any other change fails the whole run. |
-| G2 static | No `.only/.skip/.todo`, `@ts-ignore`, `as any`, unstubbed randomness; every test asserts; no existing test removed; imports resolve without new dependencies |
-| G3 typecheck | No new `tsc` errors (frontend tests are part of `npm run build`) |
-| G4 pass | The test file passes |
-| G6 value | The test file alone covers at least one target line |
-| G5 stable | Three passes in shuffled order |
-| G7 suite | No new failures in the full package suite |
-
-This follows the acceptance filter used by Meta's TestGen-LLM and CoverUp: builds, passes, passes repeatedly, adds coverage. A failing assertion that the author attributes to a bug in the source is not "repaired" into passing: the test is dropped from the patch and reported as a suspected defect.
-
-**Replaceable author.** The authoring step is a port with three drivers:
-
-- `sdk`: Claude Agent SDK, one session per target, the custom agent and skills from `.claude/`. Default in CI.
-- `external`: the CLI hands the same task packet to whoever drives it (a person, Cursor, Claude Code) and waits for `uta submit`. Refused in CI.
-- `stub`: replays recorded output; used by the harness tests.
-
-All three get the same prompt (rendered once in `agent/src/packet.mjs`), the same tools, the same budgets, and the same gates. This made it possible to develop and verify the whole flow step by step from the command line.
-
-**Least privilege in the workflow.** Two jobs:
-
-- `author`: holds the model key and a read-only token, runs repository code. Every Vitest and `tsc` run happens in a Docker container with no network, no secrets, and resource limits. The harness and `.claude/` are checked out from the base branch, so a PR cannot change the agent that reviews it (`projectConfigRoot` in the SDK).
-- `publish`: holds a write token and never runs repository code. It re-validates the patch (only allowlisted test paths, no renames, deletions, mode changes, or binaries), checks the PR head did not move, applies it with `git apply`, commits, and updates a single PR comment.
-
-**No framework beyond the SDK.** Plain Node ESM, no LangChain or LangGraph. The harness has two runtime dependencies (the Agent SDK and zod) and its own test suite (`node --test`).
+**Small stack.** Plain Node ESM, no LangChain or LangGraph; two runtime dependencies (Agent SDK, zod); 43 harness tests, including end-to-end runs on real Vitest and `tsc`, the real Agent SDK against a scripted Messages API, and the Docker sandbox in CI.
 
 ## Running the PR workflow
 
 Prerequisites:
 
-1. Repository secret `ANTHROPIC_API_KEY`. Without it the workflow skips the agent with a notice instead of failing.
-2. Settings, Actions, General: "Allow GitHub Actions to create and approve pull requests" (bootstrap mode opens a PR).
-3. Optional repository variables: `TEST_AGENT_MODE` (`commit`, the default, or `comment`), `TEST_AGENT_MODEL` (default `claude-sonnet-5-5`).
-4. GitHub-hosted `ubuntu-latest` runners (Docker is preinstalled).
+1. Repository secret `ANTHROPIC_API_KEY` (without it the workflow skips the agent with a notice).
+2. Settings, Actions, General: allow GitHub Actions to create pull requests (bootstrap mode).
+3. Optional variables: `TEST_AGENT_MODE` (`commit` default, or `comment`), `TEST_AGENT_MODEL`.
+4. GitHub-hosted `ubuntu-latest` runners (Docker preinstalled).
 
-Triggers:
-
-- Automatically on pull requests that change `frontend/src/**` or `backend/src/**` (opened, synchronize, reopened, ready for review; drafts and fork PRs are skipped).
-- Manually (Actions, "Unit test agent", Run workflow) for bootstrap mode, which targets files below 80% line coverage and opens a PR with the tests.
-
-Locally, with dependencies installed in `backend/` and `frontend/`:
-
-```sh
-node agent/src/cli.mjs run --mode pr --base origin/main --author external
-node agent/src/cli.mjs packet --target t1        # the prompt the author receives
-node agent/src/cli.mjs tool run-tests --target t1
-node agent/src/cli.mjs submit --target t1 --result result.json
-node agent/src/cli.mjs gate --target t1
-node agent/src/cli.mjs resume
-node agent/src/publish.mjs --identity local --run .uta-runs/<run id> --repo <owner>/<repo> --pr <n> --workspace .
-```
-
-With `ANTHROPIC_API_KEY` set, `--author sdk` runs the same flow with the Claude agent.
+It runs automatically on pull requests that change `frontend/src/**` or `backend/src/**` (drafts and forks skipped), and manually ("Run workflow") in bootstrap mode, which covers files below 80% and opens a PR. Locally, see the CLI in [`agent/README.md`](agent/README.md); `--author external` needs no key.
 
 ## Custom agent and skills
 
-`unit-test-author` (`.claude/agents/unit-test-author.md`) writes tests for exactly one source file per session. Its tools are `Read`, `Grep`, `Glob`, `Write`, `Edit`, and three task-scoped MCP tools served in process by the harness: `get_change_context`, `run_tests` (sandboxed, budgeted), and `coverage_for_file`. It has no shell and no web access. A `PreToolUse` hook (in process for the SDK, and `.claude/settings.json` for Claude Code) denies writes outside the target's test file and reads of `.env` files. The final answer is forced into a JSON schema through structured output. The harness reads the agent file itself and passes its prompt and tools to the SDK session (the SDK's own `agent` option dropped the Skill and structured-output tools in version 0.3.282). The agent process runs with an isolated home directory, so the user's `~/.claude` (memory, settings, plugins) never reaches the model.
-
-`test-reviewer` (`.claude/agents/test-reviewer.md`) is read-only and runs after a target is accepted. Its findings (tautologies, over-mocking, weak assertions) appear in the report as advisory notes and never block.
-
-Skills (`.claude/skills/`), loaded on demand; the task packet tells the author which ones apply:
+`unit-test-author` writes tests for one source file per session. Tools: `Read`, `Grep`, `Glob`, `Write`, `Edit`, `Skill`, and three task-scoped MCP tools served by the harness (`get_change_context`, `run_tests`, `coverage_for_file`); no shell, no web. A `PreToolUse` hook denies writes outside the target's test file. The final answer is a schema-checked JSON report (structured output). The harness reads the agent file and applies its prompt and tools to the SDK session, which runs with an isolated home directory. `test-reviewer` is read-only, runs after acceptance, and adds advisory notes.
 
 | Skill | Used for |
 |-------|----------|
-| `diff-test-planning` | Turning changed or uncovered lines into a case list; the rule that expected values come from intent, not from replaying the implementation |
-| `backend-unit-tests` | Supertest with a fake store, spying on the Prisma delegate without a database, `vi.stubEnv`, mocked modules, Vitest 4 pitfalls |
-| `frontend-unit-tests` | Design-system mocks, hooks with a real `QueryClient`, `fetch` stubs, fake timers, Prettier and `tsc` constraints |
-| `test-failure-triage` | Failure classes, deciding test bug vs code bug, forbidden "fixes" |
+| `diff-test-planning` | Case list from changed lines; expected values from intent, not from replaying the implementation |
+| `backend-unit-tests` | Supertest with fake stores, Prisma delegate spies without a database, env stubs, Vitest pitfalls |
+| `frontend-unit-tests` | Design-system mocks, hooks with a real `QueryClient`, `fetch` stubs, fake timers |
+| `test-failure-triage` | Failure classes, test bug vs code bug, forbidden fixes |
 | `test-quality-review` | The reviewer's checklist |
 
-The skills are plain `SKILL.md` files. The same files serve the SDK agent in CI and a developer using Claude Code locally.
+The task packet names the skills for each target; the same `SKILL.md` files work in CI and in a developer's Claude Code.
 
-## Example run
+## Example run: PR #3
 
-### Pull request #3: task statistics
+[PR #3](https://github.com/Mensamayne/taskly-unit-test-agent/pull/3) adds task statistics (`GET /api/todos/stats`, a `TodoStats` component, sort by title). On purpose, `computeStats` contained a defect (completed tasks counted as overdue, contrary to its documented contract), and the new component broke eight existing `TodosPage` tests.
 
-[PR #3](https://github.com/Mensamayne/taskly-unit-test-agent/pull/3) adds `GET /api/todos/stats`, a `TodoStats` component, and a "sort by title" option. Two things were set up on purpose to exercise the agent: `computeStats` contained a planted defect (completed tasks counted as overdue, contrary to its documented contract), and adding `TodoStats` to the page broke eight existing `TodosPage` tests.
+| File | Decision | Skills | Outcome |
+|------|----------|--------|---------|
+| `TodosPage.tsx` | repair-existing | planning, frontend, triage | accepted; new child mocked, no assertion changed |
+| `stats.ts` | write | planning, backend | **suspected defect** reported; test not committed |
+| `TodoStats.tsx` | write | planning, frontend | accepted, 3/3 target lines |
+| `router.ts` | update | planning, backend | accepted, 2/2 |
+| `api/todos.ts` | update | planning, frontend | accepted, 1/1 |
+| `useTodoStatsQuery.ts` | write | planning, frontend | accepted, 1/1 |
+| `utils/todos.ts` | update | planning, frontend | accepted, 1/1 |
 
-Run 1 (`pr-20261009-152049`), plan:
+Seven files were `noop` with a reason each. Final verification: backend 92 and frontend 97 tests, no new type errors, "Tests passed". Six test files were committed to the PR with the status `unit-test-agent/verified` and the report as a PR comment. After the developer fixed the defect, a second run wrote the `stats.ts` tests (unchanged, written against the contract), which now passed and were committed; the same comment was updated.
 
-| File | Decision | Skills in the packet | Outcome |
-|------|----------|----------------------|---------|
-| `frontend/src/features/todos/TodosPage.tsx` | repair-existing | diff-test-planning, frontend-unit-tests, test-failure-triage | accepted: the new child component is mocked; no existing assertion changed |
-| `backend/src/features/todos/stats.ts` | write | diff-test-planning, backend-unit-tests | **suspected defect**: "never counts completed tasks as overdue" fails; test dropped and reported |
-| `frontend/src/features/todos/components/TodoStats.tsx` | write | diff-test-planning, frontend-unit-tests | accepted, 3/3 target lines |
-| `backend/src/features/todos/router.ts` | update | diff-test-planning, backend-unit-tests | accepted, 2/2 |
-| `frontend/src/features/todos/api/todos.ts` | update | diff-test-planning, frontend-unit-tests | accepted, 1/1 |
-| `frontend/src/features/todos/hooks/useTodoStatsQuery.ts` | write | diff-test-planning, frontend-unit-tests | accepted, 1/1 |
-| `frontend/src/features/todos/utils/todos.ts` | update | diff-test-planning, frontend-unit-tests | accepted, 1/1 |
+[PR #2](https://github.com/Mensamayne/taskly-unit-test-agent/pull/2) is a bootstrap run: 20 of 20 targets accepted; its body is the agent's report.
 
-Seven files were `noop` with a reason each (types and query keys outside the coverage scope, `styles.css`, the mutation hooks whose changed lines were already covered). Final verification: backend 92 tests, frontend 97 tests, no new type errors: "Tests passed". The publisher committed six test files to the PR, set the commit status `unit-test-agent/verified`, and posted the report as a PR comment.
-
-The developer then pushed the fix for the reported defect. Run 2 (`pr-20261009-152601`) planned one target, `stats.ts` (`write`, new file without its own test file). The test written against the contract now passed all gates and was committed; the same PR comment was updated.
-
-### Pull request #2: bootstrap
-
-[PR #2](https://github.com/Mensamayne/taskly-unit-test-agent/pull/2) is a bootstrap run over both packages: 20 of 20 targets accepted, 0 repairs needed in the final run, coverage numbers in the table at the top. The PR body is the agent's report.
-
-### Runs that failed, and why
-
-Kept on purpose, because they show the gates working:
-
-- Two runs failed on G1 (scope): while authoring one target, the author touched a file that belonged to another target (once by reformatting an accepted file, once by writing the next target's file early). The whole run was rejected and replayed. As a consequence the harness now formats frontend test files itself before the gates.
-- On a PR whose changes broke existing tests, the first baseline failed because Vitest skips the coverage report when tests fail. Fixed with `--coverage.reportOnFailure` and covered by an e2e test.
-- A new helper covered only indirectly (through a router test) was planned as `noop`. The planner now gives every new file its own tests.
-
-### Who authored the tests in these runs
-
-The repository has no model key yet, so the runs above used the `external` driver, with Claude Code driving the CLI as the author. It received the same task packets, loaded the same skill files, used the same tools, and passed the same gates as the `sdk` driver. The `sdk` driver has not run against the real model in this repository. It is verified end to end against a scripted stand-in for the Messages API (`agent/test/sdk.e2e.test.mjs`): the real Agent SDK and Claude Code process load the agent prompt and the skills, call the MCP tools, are stopped by the write hook, return structured output, and resume the same session for a repair. That test found three wiring bugs that would have shown up only with a key.
-
-## Edge cases
-
-After the example runs, the harness was attacked from the author's side on a scratch branch: written tests were made to fail, hang, cheat, and break the environment. Each case below was run for real through the CLI; the cases marked "fixed" were handled wrongly before this review.
-
-| Case | Behavior | Status |
-|------|----------|--------|
-| Syntax error in the test | G3 reports the `tsc` error with file and line; repair | as designed |
-| Test imports a module that does not exist | G2 rejects before running anything | as designed |
-| Author writes no file, or a file without tests | G1 / G2, repair | as designed |
-| Invalid self-report, or `gate` before `submit` | Typed CLI error, state unchanged | as designed |
-| Author exhausts `run_tests` | Budget error from the tool; host gates still run | as designed |
-| Test calls `process.exit` | Vitest intercepts it; runtime failure with the message | as designed |
-| Test writes to a production file while running | Was **accepted**. Now every test run is followed by a worktree check; the file is reverted and the target fails with `side-effect` | fixed |
-| Flaky test (`Math.random`) resubmitted until it passes | Was **accepted** on the third try. Now G2 rejects unstubbed randomness, and a resubmitted file that already failed is rejected without running (G0) | fixed |
-| Repair that fails exactly like the previous attempt | Used to spend the next repair. Now stops the target early (no progress) | fixed |
-| Test hangs on a promise | Reported as "STACK_TRACE_ERROR", class runtime. Now class `timeout` with an actionable message | fixed |
-| Synchronous infinite loop | Command timeout; the whole process tree is killed (process group on Linux, `taskkill /T` on Windows) and a container is stopped by name | fixed; the container path is tested in CI (`agent/test/docker.e2e.test.mjs`) |
-| Vitest or `tsc` cannot run at all | Was charged to the author as a test failure. Now class `infra`: retried once, then "not verified", never a repair | fixed |
-| Author claims a defect for a failure it caused | Claims must name a test that failed on an assertion; the report labels them as unverified | partly fixed (a correctly named but wrong claim still reaches the report, labeled) |
-| Two sources with the same file name (flat backend tests) | Second one is a `noop` instead of two authors overwriting one file | fixed |
-| Path with `..` in a patch header (`backend/tests/../src/x.test.ts`) | Passed the raw allowlist check used by the publisher. Now rejected | fixed |
-| PR breaks existing tests | Baseline keeps coverage (`reportOnFailure`); target becomes `repair-existing` | fixed earlier |
-| Aborted or failed run | Report said "no source changes". Now "Could not verify the result: the run failed (code)" | fixed |
-| Author cannot see what changed | The packet now includes the unified diff of the file, not only line numbers | fixed |
-
-How the reviewed projects handle the same problems, read from their code:
-
-| Problem | CoverUp | ai-git-bot | unit-test-agent-4j | This harness |
-|---------|---------|------------|--------------------|--------------|
-| Hanging test | 60 s timeout, then gives up the segment | Tool timeout | Timeout failure type | Command timeout, tree kill, typed `timeout` |
-| Flaky test | `--repeat-tests` | One whole-suite retry (can hide flakiness) | Not handled | Shuffled repeats, randomness check, no resubmission |
-| State pollution | `--isolate-tests`, can disable polluters | Not handled | Not handled | Full suite gate, file-level isolation, side-effect revert |
-| Infra vs test failure | Separate timeout path | `ERROR` vs `FAILED` outcome | Failure taxonomy | `infra` class, retried, never charged to the author |
-| Endless repair | `--max-attempts` | Retry budget | Per-test cap, stagnation detection | Max 2 repairs, no-progress stop |
-| Path traversal | n/a | Guard does not normalize `..` | Project-root sandbox | Normalized hook, segment check on raw patch paths |
-| Missing dependency | Optionally `pip install`s it | n/a | Dependency failure type | Rejected at G2, never installed |
+These runs used the `external` driver with Claude Code as the author, because the repository has no model key yet: same packets, skills, tools, and gates as the `sdk` driver. The `sdk` driver is verified end to end against a scripted Messages API (`agent/test/sdk.e2e.test.mjs`), which found three wiring problems described in [`docs/edge-cases.md`](docs/edge-cases.md).
 
 ## Assumptions
 
-- Pull request authors are repository collaborators. Fork PRs are skipped because they get no secrets.
-- Unit tests need no database or network; the existing tests already follow this.
-- Vitest stays the only test framework; the agent never adds dependencies.
-- The base branch holds the trusted version of the harness and the agent configuration.
-- A test that covers the target lines, passes repeatedly, and asserts intended behavior is worth committing; the human reviewer still reviews the PR.
+- PR authors are collaborators; fork PRs get no secrets and are skipped.
+- Unit tests need no database or network, and Vitest stays the only test framework.
+- The base branch holds the trusted harness and agent configuration.
+- Accepted tests still go through normal human review of the PR.
 
 ## Limitations
 
-- No run with the real model yet (no key in this repository). The `sdk` driver is tested against a scripted Messages API, so the wiring is verified, not the quality of tests a model writes; the `external` runs show the quality bar the gates enforce. The Docker sandbox is tested in CI on Linux; it does not run on a Windows host with Windows `node_modules`.
-- Commits pushed with `GITHUB_TOKEN` do not trigger other workflows, so CI does not rerun on the agent's commit. The publisher sets a commit status from the verified run instead.
-- Coverage is a proxy for value. A changed line that existing tests execute is a `noop` even if no test asserts the new behavior (in PR #3 the cache invalidation added to the mutation hooks is executed but not asserted).
-- Static checks are regular expressions: fast and conservative, not a parser. Randomness is detected for `Math.random` and `randomUUID` only.
-- Value is measured on lines, not branches: a test that covers a new branch on an already covered line does not count (CoverUp measures both).
-- The side-effect check sees files git tracks or would track. Writes to ignored paths (for example `coverage/`) or outside the repository are not detected; in CI the sandbox has no network, and the patch only ever carries test files.
-- A defect claim that names the right failing test but is wrong reaches the report; it is labeled as unverified.
-- Per target, results are all or nothing. A test file with one wrong test and five good ones is rejected after two repairs.
-- The PR comment shows the latest run only; earlier findings remain in the commit history and workflow artifacts.
-- For same-repository PRs, the workflow file itself comes from the PR branch, as with any GitHub workflow. Collaborators with write access are trusted with workflows anyway.
-- Targets per run are capped (8 by default), so a very large PR is covered over several pushes.
+- No run with the real model yet: the SDK wiring is verified, the quality of model-written tests is not. The Docker sandbox runs on Linux only.
+- Commits pushed with `GITHUB_TOKEN` do not retrigger CI; the publisher sets a commit status from the verified run instead.
+- Coverage is a proxy: changed lines that existing tests execute are a `noop` even if the new behavior is not asserted. Gains are measured on lines, not branches.
+- Static checks are regular expressions; a correctly named but wrong defect claim reaches the report (labeled unverified).
+- Results are all or nothing per target; the PR comment shows the latest run only; targets per run are capped (8).
 
 ## What I would change for production
 
-- A GitHub App identity for the publisher, so CI reruns on the agent's commits and branch protection can require them.
-- Mutation testing (for example Stryker) as an additional value gate for accepted tests.
-- Keep run history across pushes (suspected defects, rejected targets) in the comment marker, and retry targets whose source changed since a rejection.
-- Run independent targets in parallel and cache the baseline per base commit.
-- An evaluation set of past PRs replayed through the pipeline to measure changes to prompts, skills, or models before rolling them out.
-- Cost and outcome dashboards from `run.json` artifacts.
-- A TypeScript AST for the static checks instead of regular expressions.
+- A GitHub App identity, so CI reruns on the agent's commits and branch protection can require them.
+- Mutation testing (for example Stryker) as an extra value gate; branch-aware coverage gains.
+- Run history across pushes in the PR comment; parallel targets; baseline cache per base commit.
+- An evaluation set of past PRs to measure changes to prompts, skills, or models; cost dashboards from `run.json`.
 
 ## Removing the agent
 
-Delete `agent/`, `.claude/`, and `.github/workflows/unit-test-agent.yml`, and remove the harness job from `ci.yml`. Taskly and its CI keep working; the tests the agent wrote are ordinary Vitest files.
+Delete `agent/`, `.claude/`, `docs/edge-cases.md`, and `.github/workflows/unit-test-agent.yml`, and remove the harness job from `ci.yml`. Taskly keeps working; the tests the agent wrote are ordinary Vitest files.
