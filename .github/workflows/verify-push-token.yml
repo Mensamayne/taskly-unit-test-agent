@@ -1,0 +1,55 @@
+name: Verify push token (temporary)
+
+# Temporary check, removed after use: proves that UNIT_TEST_AGENT_PUSH_TOKEN can push to a PR branch
+# and that the agent-commit guard sees such a commit, without running the model.
+
+on:
+  pull_request:
+    paths: ['.github/workflows/verify-push-token.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Stop on the commit this workflow pushed
+        id: again
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          msg="$(gh api "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA" --jq .commit.message)"
+          if printf '%s\n' "$msg" | grep -q '^Accepted by the unit-test agent (run '; then
+            echo "Head is the marker commit; the guard matched it. Nothing else to do."
+            echo "done=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Check out the PR branch with the push token
+        if: steps.again.outputs.done != 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          path: ws
+          token: ${{ secrets.UNIT_TEST_AGENT_PUSH_TOKEN || github.token }}
+      - name: Report the token identity
+        if: steps.again.outputs.done != 'true'
+        env:
+          PUSH_TOKEN: ${{ secrets.UNIT_TEST_AGENT_PUSH_TOKEN }}
+        run: |
+          if [ -z "$PUSH_TOKEN" ]; then echo "::error::UNIT_TEST_AGENT_PUSH_TOKEN is empty"; exit 1; fi
+          login="$(GH_TOKEN="$PUSH_TOKEN" gh api user --jq .login 2>/dev/null || echo '(fine-grained token without user read)')"
+          echo "Token login: $login"
+          GH_TOKEN="$PUSH_TOKEN" gh api "repos/$GITHUB_REPOSITORY" --jq '"push permission: \(.permissions.push)"'
+      - name: Push a marker commit with the agent's commit message
+        if: steps.again.outputs.done != 'true'
+        working-directory: ws
+        run: |
+          mkdir -p verify
+          date -u +%FT%TZ > verify/marker.txt
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' add verify/marker.txt
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -q -m 'test: verify push token' -m 'Accepted by the unit-test agent (run verify-push-token).'
+          git push origin HEAD
+          echo "Pushed $(git rev-parse HEAD)"
