@@ -29,6 +29,9 @@ vi.mock('./components/TodosHeader', () => ({
   ),
 }))
 vi.mock('./components/TodoFilters', () => ({ TodoFilters: () => null }))
+vi.mock('./components/TodoStats', () => ({
+  TodoStats: () => <p>Task summary</p>,
+}))
 vi.mock('./components/TodoList', () => ({
   TodoList: (props: {
     todos: Todo[]
@@ -251,4 +254,41 @@ describe('TodosPage interactions', () => {
     expect(notify).toHaveBeenCalledWith('Task deleted.')
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
+})
+
+it('shows the task summary between the header and the task list', () => {
+  vi.mocked(useTodosQuery).mockReturnValue({
+    data: [todoFixture],
+    isPending: false,
+    isFetching: false,
+    isError: false,
+    error: null,
+    refetch: vi.fn(),
+  } as unknown as ReturnType<typeof useTodosQuery>)
+  vi.mocked(useUpdateTodoMutation).mockReturnValue({
+    error: null,
+    reset: vi.fn(),
+    mutateAsync: vi.fn(),
+  } as unknown as ReturnType<typeof useUpdateTodoMutation>)
+  vi.mocked(useTodosBusy).mockReturnValue(false)
+  vi.mocked(useNotice).mockReturnValue({ message: '', notify: vi.fn() })
+  vi.mocked(useTodoFilters).mockReturnValue({
+    filter: 'all',
+    search: '',
+    sort: 'newest',
+    visible: [todoFixture],
+    setFilter: vi.fn(),
+    setSearch: vi.fn(),
+    setSort: vi.fn(),
+  })
+  render(<TodosPage />)
+  const header = screen.getByRole('heading', { name: 'Tasks' })
+  const summary = screen.getByText('Task summary')
+  const list = screen.getByText('Task list')
+  expect(
+    header.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy()
+  expect(
+    summary.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy()
 })

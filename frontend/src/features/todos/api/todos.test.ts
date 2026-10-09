@@ -57,3 +57,11 @@ it('deletes a task by ID', async () => {
   await expect(todosApi.remove(7)).resolves.toBeUndefined()
   expect(request).toHaveBeenCalledWith('/todos/7', { method: 'DELETE' })
 })
+
+it('fetches the task statistics with the abort signal', async () => {
+  const signal = new AbortController().signal
+  const stats = { total: 2, completed: 1, active: 1, overdue: 0 }
+  vi.mocked(request).mockResolvedValue(stats)
+  await expect(todosApi.stats(signal)).resolves.toEqual(stats)
+  expect(request).toHaveBeenCalledWith('/todos/stats', { signal })
+})
