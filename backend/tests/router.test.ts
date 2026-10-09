@@ -1,6 +1,6 @@
 import express from 'express';
 import request from 'supertest';
-import { it, expect, vi } from 'vitest';
+import { afterEach, it, expect, vi } from 'vitest';
 import { createTodosRouter } from '../src/features/todos/router.ts';
 import { todo } from './fixture.ts';
 
@@ -83,4 +83,21 @@ it('deletes a task with 204 and returns 404 when it does not exist', async () =>
   const missing = await request(app).delete('/api/todos/1');
   expect(missing.status).toBe(404);
   expect(missing.body).toEqual({ detail: 'Task not found.' });
+});
+
+afterEach(() => vi.useRealTimers());
+
+it('summarizes the stored tasks against the current date', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-10-15T09:00:00Z'));
+  const { app, repository } = setup();
+  repository.list.mockResolvedValue([
+    { ...todo, id: 1, due_date: '2026-10-10' },
+    { ...todo, id: 2, due_date: '2026-10-20' },
+    { ...todo, id: 3, due_date: null, completed: true },
+  ]);
+  const response = await request(app).get('/api/todos/stats');
+  expect(response.status).toBe(200);
+  expect(response.body).toEqual({ total: 3, completed: 1, active: 2, overdue: 1 });
+  expect(repository.get).not.toHaveBeenCalled();
 });

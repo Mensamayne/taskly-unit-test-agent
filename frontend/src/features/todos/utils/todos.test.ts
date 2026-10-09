@@ -149,3 +149,14 @@ describe('formatDate', () => {
     expect(formatDate('2024-02-29')).toBe('29 Feb 2024')
   })
 })
+
+describe('selectTodos by title', () => {
+  it('sorts alphabetically regardless of case, newer tasks first on equal titles', () => {
+    const apples = { ...base, id: 2, title: 'apples' }
+    const bread = { ...base, id: 3, title: 'Bread' }
+    const applesNewer = { ...base, id: 4, title: 'Apples' }
+    expect(
+      selectTodos([bread, apples, applesNewer], 'all', '', 'title'),
+    ).toEqual([applesNewer, apples, bread])
+  })
+})

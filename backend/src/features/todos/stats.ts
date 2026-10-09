@@ -1,0 +1,23 @@
+import type { Todo } from './types.js';
+
+export interface TodoStats {
+  total: number;
+  completed: number;
+  active: number;
+  /** Active tasks whose due date is before `today`. Completed tasks are never overdue. */
+  overdue: number;
+}
+
+/**
+ * Summary counts for the task list.
+ * @param today calendar date (YYYY-MM-DD) the overdue check compares against
+ */
+export function computeStats(todos: Todo[], today: string): TodoStats {
+  const completed = todos.filter((todo) => todo.completed).length;
+  return {
+    total: todos.length,
+    completed,
+    active: todos.length - completed,
+    overdue: todos.filter((todo) => !todo.completed && todo.due_date !== null && todo.due_date < today).length,
+  };
+}
