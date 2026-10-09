@@ -160,7 +160,7 @@ export function renderTaskPacket({ root, state, target, budgets }) {
     lines.push('', '## What fails on the head commit', '');
     for (const group of groupFailures(target.knownProblems)) lines.push(`- ${group.label}: ${group.message}`);
   }
-  lines.push('', '## Skills to load first', '');
+  lines.push('', '## Skills to load first', '', 'Load each with the Skill tool (external drivers: read the file).', '');
   for (const s of packet.skills) lines.push(`- ${s.name}: \`${s.path}\``);
   lines.push('', '## Rules', '');
   lines.push(`1. Write only \`${target.testPath}\`. Do not edit production code, fixtures, configuration, or other tests.`);
@@ -172,9 +172,9 @@ export function renderTaskPacket({ root, state, target, budgets }) {
     lines.push('6. Change only assertions that this pull request explains, and list each one under `modifiedExistingAssertions`.');
   }
   lines.push('', '## Tools', '');
-  lines.push(`- \`get_change_context\` (CLI: \`uta tool change-context --target ${target.id}\`)`);
-  lines.push(`- \`run_tests\` runs the test file in the sandbox (CLI: \`uta tool run-tests --target ${target.id}\`). Runs left: ${toolRunsLeft}.`);
-  lines.push(`- \`coverage_for_file\` shows covered lines after your last run (CLI: \`uta tool coverage --target ${target.id}\`).`);
+  lines.push(`- \`get_change_context\` (external drivers: \`uta tool change-context --target ${target.id}\`)`);
+  lines.push(`- \`run_tests\` runs the test file in the sandbox (external drivers: \`uta tool run-tests --target ${target.id}\`). Runs left: ${toolRunsLeft}.`);
+  lines.push(`- \`coverage_for_file\` shows covered lines after your last run (external drivers: \`uta tool coverage --target ${target.id}\`).`);
   lines.push('', 'The host re-runs every check after you finish. Your own runs are for iteration only.');
   if (feedback) {
     lines.push('', `## Feedback from attempt ${target.attempts - 1}`, '');

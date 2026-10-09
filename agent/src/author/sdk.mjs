@@ -168,7 +168,7 @@ export function createSdkDriver({ configRoot }) {
       mkdirSync(dirname(transcript), { recursive: true });
       const allowedWrites = [target.testPath];
       const guardHook = async (input) => {
-        const verdict = evaluateToolUse(root, input, { allowedWrites });
+        const verdict = evaluateToolUse(root, input, { allowedWrites, readRoots: [join(configRoot, '.claude', 'skills')] });
         return verdict.decision === 'deny'
           ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: verdict.reason } }
           : {};
@@ -241,6 +241,13 @@ export function createSdkDriver({ configRoot }) {
         allowedTools: [...reviewer.builtInTools, 'Skill', 'StructuredOutput'],
         disallowedTools: [...DENIED_TOOLS, 'Write', 'Edit'],
         permissionMode: 'dontAsk',
+        // Same read limits as the author (no .env, no run state); nothing is writable.
+        hooks: { PreToolUse: [{ hooks: [async (input) => {
+          const verdict = evaluateToolUse(root, input, { allowedWrites: [], readRoots: [join(configRoot, '.claude', 'skills')] });
+          return verdict.decision === 'deny'
+            ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: verdict.reason } }
+            : {};
+        }] }] },
         maxTurns: 12,
         maxBudgetUsd: Math.max(0.05, Math.min(0.3, config.budgets.usdPerRun - (state.costUsd ?? 0))),
         outputFormat: { type: 'json_schema', schema: REVIEW_SCHEMA },

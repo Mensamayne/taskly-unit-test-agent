@@ -110,10 +110,20 @@ export function evaluateToolUse(root, event, active) {
   if (READ_TOOLS.has(tool)) {
     const target = input.file_path ?? input.path;
     if (!target) return { decision: 'allow' };
+    // Skills are loaded from the trusted checkout, outside the workspace; their reference
+    // files must stay readable or the skills point at text the agent cannot open.
+    if ((active.readRoots ?? []).some((dir) => isInside(dir, target))) return { decision: 'allow' };
     const check = checkRead(root, target);
     return check.ok ? { decision: 'allow' } : { decision: 'deny', reason: check.reason };
   }
   return { decision: 'allow' };
+}
+
+/** True if `target` (absolute) lies inside directory `dir`, without `..` tricks. */
+function isInside(dir, target) {
+  if (typeof target !== 'string' || !isAbsolute(target)) return false;
+  const rel = relative(resolve(dir), resolve(target));
+  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
 }
 
 /** Read the active-run marker, or null. */

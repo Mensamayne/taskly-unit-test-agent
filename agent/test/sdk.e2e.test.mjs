@@ -71,6 +71,8 @@ function model(body) {
     }
     const steps = [
       { type: 'tool_use', name: 'Skill', input: { skill: 'backend-unit-tests' } },
+      { type: 'tool_use', name: 'Read', input: { file_path: join(REPO, '.claude', 'skills', 'backend-unit-tests', 'references', 'patterns.md') } },
+      { type: 'tool_use', name: 'Read', input: { file_path: join(cwd, '.env') } },
       { type: 'tool_use', name: 'mcp__taskly__get_change_context', input: {} },
       { type: 'tool_use', name: 'Write', input: { file_path: join(cwd, SOURCE), content: '// rewritten by the model\n' } },
       { type: 'tool_use', name: 'Write', input: { file_path: join(cwd, testPath), content: GOOD_TEST } },
@@ -140,7 +142,7 @@ describe('sdk driver with a scripted model', { skip: !existsSync(SDK) && 'agent 
     assert.deepEqual(run.json.targets.map((t) => [t.path, t.status, t.attempts]), [[SOURCE, 'accepted', 1]]);
 
     const author = api.requests.filter((b) => (b.tools ?? []).some((t) => t.name === 'Write'));
-    assert.ok(author.length >= 6, `expected a full author session, got ${author.length} requests`);
+    assert.ok(author.length >= 8, `expected a full author session, got ${author.length} requests`);
     const first = author[0];
     const tools = first.tools.map((t) => t.name).sort();
     assert.deepEqual(tools, ['Edit', 'Glob', 'Grep', 'Read', 'Skill', 'StructuredOutput', 'Write', 'mcp__taskly__coverage_for_file', 'mcp__taskly__get_change_context', 'mcp__taskly__run_tests']);
@@ -150,6 +152,11 @@ describe('sdk driver with a scripted model', { skip: !existsSync(SDK) && 'agent 
     const results = toolResults(author[author.length - 1]);
     const by = (name) => results.filter((r) => r.name === name);
     assert.match(by('Skill')[0].text, /Backend unit tests|backend-unit-tests/i, 'the skill was loaded');
+    const [reference, secret] = by('Read');
+    assert.equal(reference.isError, false, 'skill reference files are readable from the trusted checkout');
+    assert.match(reference.text, /Backend test patterns/);
+    assert.equal(secret.isError, true);
+    assert.match(secret.text, /not allowed: \.env/);
     assert.match(by('mcp__taskly__get_change_context')[0].text, /"target": "t1"/);
     const [denied, written] = by('Write');
     assert.equal(denied.isError, true);
