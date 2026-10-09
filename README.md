@@ -1,5 +1,9 @@
 # Taskly App Node
 
+## Unit-test agent
+
+This repository includes an agent that writes and updates unit tests for pull requests, runs them, and reports the result on the PR. See [`SOLUTION.md`](SOLUTION.md) for the design and how to run it, [`agent/README.md`](agent/README.md) for the harness and CLI, and `.claude/` for the agent and its skills.
+
 ## Setup
 
 ```sh

@@ -16,7 +16,7 @@ coverage/
 .env.*
 !.env.example
 
-# Local notes / concepts (never publish; assignment briefs, drafts)
+# Local notes (not part of the repository)
 _private/
 
 # Unit test agent run directories
