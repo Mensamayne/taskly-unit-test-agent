@@ -16,6 +16,12 @@ coverage/
 .env.*
 !.env.example
 
+# Local notes / concepts (never publish; assignment briefs, drafts)
+_private/
+
+# Unit test agent run directories
+.uta-runs/
+
 # Logs
 *.log
 
