@@ -49,6 +49,9 @@ function staysInsideRoot(root, abs) {
 
 /** @param {string} relPath repo-relative POSIX path */
 export function isWritablePath(relPath) {
+  // Callers may pass raw paths (for example from a patch header). A '.', '..', or empty
+  // segment could point outside the test tree after normalization, so it is never writable.
+  if (typeof relPath !== 'string' || relPath.split('/').some((s) => s === '' || s === '.' || s === '..')) return false;
   return WRITABLE.some((re) => re.test(relPath));
 }
 

@@ -11,7 +11,9 @@ import { renderTaskPacket, validateResult } from '../src/packet.mjs';
 import { planBootstrap, planPullRequest, testPathFor } from '../src/plan.mjs';
 import { renderReport, verificationLine } from '../src/report.mjs';
 import { expectStatus, nextStep } from '../src/state.mjs';
-import { blocksWithoutExpect, extractTitles, findDisallowedMarkers, importSpecifiers, removedAssertionLines } from '../src/testfile.mjs';
+import { blocksWithoutExpect, extractTitles, findDisallowedMarkers, importSpecifiers, removedAssertionLines, unstubbedRandomness } from '../src/testfile.mjs';
+import { classifyFailure, explainFailure } from '../src/runner.mjs';
+import { matchedDefectClaims } from '../src/pipeline.mjs';
 
 const ROOT = mkdtempSync(join(tmpdir(), 'uta-unit-'));
 process.on('exit', () => rmSync(ROOT, { recursive: true, force: true }));
@@ -310,7 +312,8 @@ describe('report', () => {
     assert.match(body, /Accepted: 1 of 2 target\(s\)\. Tests passed\./);
     assert.match(body, /\| `backend\/src\/a.ts` \| write \| `backend\/tests\/a.test.ts` \| accepted \| 2\/2 target lines \|/);
     assert.match(body, /counts overdue\. completed tasks are counted/);
-    assert.match(body, /failing assertion: expected 2 to be 1$/m);
+    assert.match(body, /failing assertion: expected 2 to be 1 stack$/m);
+    assert.match(body, /Not verified by the harness/);
   });
 });
 
@@ -335,10 +338,65 @@ describe('publish patch validation', async () => {
   it('rejects production paths, renames, deletions, modes, and binaries', () => {
     assert.throws(() => validatePatch(newFile('backend/src/factory.ts')), /outside the test allowlist/);
     assert.throws(() => validatePatch(newFile('.github/workflows/ci.test.ts')), /outside the test allowlist/);
+    assert.throws(() => validatePatch(newFile('backend/tests/../src/factory.test.ts')), /outside the test allowlist/);
+    assert.throws(() => validatePatch(newFile('frontend/src/./lib/x.test.ts')), /outside the test allowlist/);
     assert.throws(() => validatePatch(`${newFile('backend/tests/a.test.ts')}\ndiff --git a/backend/tests/b.test.ts b/backend/tests/b.test.ts\ndeleted file mode 100644`), /deleted file mode/);
     assert.throws(() => validatePatch('diff --git a/backend/tests/a.test.ts b/backend/tests/c.test.ts\nrename from backend/tests/a.test.ts'), /unexpected diff header|rename from/);
     assert.throws(() => validatePatch(newFile('backend/tests/a.test.ts').replace('new file mode 100644', 'new file mode 120000')), /unexpected file mode/);
     assert.throws(() => validatePatch(`${newFile('backend/tests/a.test.ts')}\nGIT binary patch`), /binary/);
     assert.throws(() => validatePatch('--- /dev/null\n+++ b/backend/src/sneaky.ts\n@@ -0,0 +1 @@\n+x'), /without diff header/);
+  });
+});
+
+describe('edge cases', () => {
+  it('rejects unstubbed randomness but allows stubbed', () => {
+    assert.deepEqual(unstubbedRandomness('expect(Math.random()).toBeLessThan(1)'), ['Math.random()']);
+    assert.deepEqual(unstubbedRandomness("vi.spyOn(Math, 'random').mockReturnValue(0.1); f(Math.random())"), []);
+    assert.deepEqual(unstubbedRandomness('const id = crypto.randomUUID()'), ['randomUUID()']);
+    assert.deepEqual(unstubbedRandomness('const x = 1'), []);
+  });
+
+  it('turns the reporter placeholder for a timeout into an actionable message', () => {
+    const message = explainFailure('Error: STACK_TRACE_ERROR\n    at task (x.js:1:1)', 5014.2);
+    assert.match(message, /^Test timed out after 5014 ms: an awaited promise never settled/);
+    assert.equal(classifyFailure(message), 'timeout');
+    assert.equal(explainFailure('AssertionError: expected 1 to be 2'), 'AssertionError: expected 1 to be 2');
+  });
+
+  it('accepts defect claims only for tests that failed on an assertion', () => {
+    const failures = [
+      { title: 'computeStats never counts completed tasks as overdue', class: 'assertion' },
+      { title: 'computeStats loads', class: 'runtime' },
+    ];
+    assert.equal(matchedDefectClaims([{ test: 'never counts completed tasks as overdue', reason: 'r' }], failures).length, 1);
+    assert.equal(matchedDefectClaims([{ test: 'something that passed', reason: 'r' }], failures).length, 0);
+    assert.equal(matchedDefectClaims([{ test: 'computeStats loads', reason: 'r' }], failures).length, 0, 'runtime errors are not defects');
+    assert.equal(matchedDefectClaims([{ test: '', reason: 'r' }], failures).length, 0);
+  });
+
+  it('gives a shared test path to the first source only', () => {
+    const cov = (exec) => ({ executable: new Set(exec), covered: new Set() });
+    const baseline = {
+      backend: {
+        coverage: new Map([
+          ['backend/src/api/health.ts', cov([1, 2, 3])],
+          ['backend/src/features/todos/health.ts', cov([1])],
+        ]),
+        failingFiles: new Set(),
+      },
+    };
+    const { targets, noops } = planBootstrap({ baseline, exists: () => false, maxTargets: 8, threshold: 80, skip: [] });
+    assert.deepEqual(targets.map((t) => t.path), ['backend/src/api/health.ts']);
+    assert.match(noops[0].reason, /already used by backend\/src\/api\/health\.ts/);
+  });
+
+  it('describes a failed run instead of claiming nothing changed', () => {
+    assert.equal(verificationLine({ stage: 'failed', failure: { code: 'scope_violation' }, final: null }), 'Could not verify the result: the run failed (scope_violation)');
+    assert.equal(verificationLine({ stage: 'done', final: { backend: { status: 'side-effect', newTypeErrors: 0 } } }), 'Tests failed');
+  });
+
+  it('rejects paths that climb out of a test directory', () => {
+    assert.equal(isWritablePath('backend/tests/../src/factory.test.ts'), false);
+    assert.equal(checkWrite(ROOT, 'frontend/src/__tests__/../../../backend/src/x.test.ts').ok, false);
   });
 });

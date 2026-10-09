@@ -50,6 +50,7 @@ The real components are styled-components that need a theme provider. The mocks 
 6. Restore globals: `vi.unstubAllGlobals()`, `vi.useRealTimers()` in `afterEach`.
 7. Dates: `formatDate` uses `en-GB` (`15 Oct 2026`), `isOverdue` compares with the local date; pin the clock.
 8. Do not edit production files, `src/test/*`, `vite.config.ts`, or `package.json`. Helpers go inside the test file.
+9. Tests never write to the repository (files, fixtures, snapshots on disk) and never use unstubbed `Math.random()` or `randomUUID()`; the host rejects both.
 
 ## Checklist before finishing
 

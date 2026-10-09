@@ -86,6 +86,7 @@ export function buildChangeContext(root, state, target) {
     linesToCover: formatRanges(target.linesToCover),
     existingTestTitles: testContent ? extractTitles(testContent) : [],
     styleReference: siblingTest(root, target),
+    ...(target.diff ? { diff: target.diff } : {}),
   };
 }
 
@@ -121,6 +122,7 @@ export function renderTaskPacket({ root, state, target, budgets }) {
   if (target.action !== 'repair-existing') lines.push(`- Lines to cover: ${ctx.linesToCover}`);
   lines.push(`- Existing tests in the test file: ${ctx.existingTestTitles.length ? ctx.existingTestTitles.map((t) => `"${t}"`).join(', ') : 'none'}`);
   if (ctx.styleReference) lines.push(`- Style reference: \`${ctx.styleReference}\``);
+  if (ctx.diff) lines.push('', '## Change in this pull request', '', '```diff', ctx.diff, '```');
   lines.push('', '## Skills to load first', '');
   for (const s of packet.skills) lines.push(`- ${s.name}: \`${s.path}\``);
   lines.push('', '## Rules', '');

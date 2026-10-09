@@ -39,6 +39,17 @@ export function findDisallowedMarkers(source) {
 }
 
 /**
+ * Sources of nondeterminism used without a stub. A test that depends on them can pass the
+ * stability gate by luck, so they are rejected unless the file stubs them.
+ */
+export function unstubbedRandomness(source) {
+  const found = [];
+  if (/\bMath\.random\s*\(/.test(source) && !/vi\.spyOn\(\s*Math\s*,\s*['"]random['"]/.test(source)) found.push('Math.random()');
+  if (/\brandomUUID\s*\(/.test(source) && !/vi\.(?:spyOn|mock|stubGlobal)\([^)]*(?:crypto|randomUUID)/.test(source)) found.push('randomUUID()');
+  return found;
+}
+
+/**
  * Test blocks (text from one `it(`/`test(` to the next) that contain no assertion.
  * Returns the titles of offending blocks.
  */

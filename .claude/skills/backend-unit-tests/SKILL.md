@@ -41,6 +41,7 @@ Pick the seam that matches the unit. Code for each is in [references/patterns.md
 5. Silence expected `console.error` / `console.log` with `vi.spyOn(console, 'error').mockImplementation(() => {})` and assert on it when the log is the behavior.
 6. Restore process state you touch: `process.exitCode = undefined`, `vi.unstubAllEnvs()`.
 7. Do not edit `backend/src/**`, `backend/tests/fixture.ts`, `vitest.config.ts`, or `package.json`. New helpers go inside the test file.
+8. Tests never write to the repository (files, fixtures, snapshots on disk) and never use unstubbed `Math.random()` or `randomUUID()`; the host rejects both.
 
 ## Checklist before finishing
 

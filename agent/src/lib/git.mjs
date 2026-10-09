@@ -88,6 +88,16 @@ export async function statusEntries(root, paths = []) {
   return entries;
 }
 
+/**
+ * Unified diff of one file between the merge base and head, capped for prompt size.
+ * @param {string} root
+ */
+export async function fileDiff(root, base, head, path, maxChars = 6000) {
+  const out = await git(root, ['diff', '--no-color', '--no-ext-diff', '-U3', `${base}...${head}`, '--', path]);
+  const body = out.split(/\r?\n/).filter((l) => !/^(diff --git|index |--- |\+\+\+ )/.test(l)).join('\n').trim();
+  return body.length > maxChars ? `${body.slice(0, maxChars)}\n[diff truncated]` : body;
+}
+
 /** Author email of a commit. */
 export async function commitAuthorEmail(root, ref) {
   return (await git(root, ['log', '-1', '--format=%ae', ref])).trim();

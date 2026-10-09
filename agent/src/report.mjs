@@ -20,7 +20,8 @@ function coverageCell(t) {
 /** Overall verification line, literal by contract. */
 export function verificationLine(state) {
   const sides = Object.keys(state.final ?? {});
-  if (!sides.length) return 'Tests were not run: no source changes in frontend/ or backend/.';
+  if (state.stage === 'failed') return `Could not verify the result: the run failed (${state.failure?.code ?? 'unknown'})`;
+  if (!sides.length) return 'Tests were not run: no source changes in frontend/ or backend/';
   const ok = sides.every((s) => state.final[s].status === 'pass' && state.final[s].newTypeErrors === 0);
   return ok ? 'Tests passed' : 'Tests failed';
 }
@@ -67,6 +68,7 @@ export function renderReport(state) {
   lines.push('**Verification**', '');
   for (const [side, f] of Object.entries(state.final ?? {})) {
     lines.push(`- ${side}: full suite ${f.status} (${f.tests} tests), new type errors: ${f.newTypeErrors}`);
+    if (f.sideEffects?.length) lines.push(`  - tests changed files outside the test files (reverted): ${f.sideEffects.join(', ')}`);
   }
   lines.push('- Per target: tsc --noEmit, vitest run on the test file (repeated, shuffled), scoped coverage, full package suite');
   lines.push(`- Result: ${verificationLine(state)}`, '');
@@ -74,9 +76,13 @@ export function renderReport(state) {
   const defects = state.targets.filter((t) => t.outcome === 'suspected defect');
   lines.push('**Suspected defects**', '');
   if (!defects.length) lines.push('- none');
+  else lines.push('Claimed by the author for assertions that failed against the current source. Not verified by the harness; check before acting.', '');
   for (const t of defects) {
-    for (const d of t.result?.suspectedDefects ?? []) lines.push(`- \`${t.path}\`: ${escapeCell(d.test)}. ${escapeCell(d.reason)}`);
-    for (const f of t.defectFailures ?? []) lines.push(`  - failing assertion: ${escapeCell(f.message.split('\n')[0])}`);
+    for (const d of t.defectClaims ?? t.result?.suspectedDefects ?? []) lines.push(`- \`${t.path}\`: ${escapeCell(d.test)}. ${escapeCell(d.reason)}`);
+    for (const f of t.defectFailures ?? []) {
+      const detail = f.message.split(/\r?\n/).filter((l) => l.trim()).slice(0, 2).join(' ');
+      lines.push(`  - failing assertion: ${escapeCell(detail)}`);
+    }
   }
   lines.push('');
 
