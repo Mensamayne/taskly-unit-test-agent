@@ -85,6 +85,40 @@ it('deletes a task with 204 and returns 404 when it does not exist', async () =>
   expect(missing.body).toEqual({ detail: 'Task not found.' });
 });
 
+it('duplicates a task as a new active copy and returns 201', async () => {
+  const { app, repository } = setup();
+  const copy = { ...todo, id: 2, title: 'Plan the sprint (copy)' };
+  repository.get.mockResolvedValueOnce({ ...todo, completed: true });
+  repository.create.mockResolvedValueOnce(copy);
+  const response = await request(app).post('/api/todos/1/duplicate');
+  expect(response.status).toBe(201);
+  expect(response.body).toEqual(copy);
+  expect(repository.get).toHaveBeenCalledWith(1);
+  expect(repository.create).toHaveBeenCalledWith({ title: 'Plan the sprint (copy)', description: 'Details', priority: 'high', due_date: '2026-10-15', completed: false });
+});
+it('shortens a long title so the duplicate still fits 120 characters', async () => {
+  const { app, repository } = setup();
+  repository.get.mockResolvedValueOnce({ ...todo, title: 'x'.repeat(120) });
+  expect((await request(app).post('/api/todos/1/duplicate')).status).toBe(201);
+  const input = repository.create.mock.calls[0][0];
+  expect(input.title.length).toBeLessThanOrEqual(120);
+  expect(input.title.endsWith(' (copy)')).toBe(true);
+});
+it('returns 404 when duplicating a missing task without creating anything', async () => {
+  const { app, repository } = setup();
+  repository.get.mockResolvedValueOnce(null);
+  const response = await request(app).post('/api/todos/9/duplicate');
+  expect(response.status).toBe(404);
+  expect(response.body).toEqual({ detail: 'Task not found.' });
+  expect(repository.create).not.toHaveBeenCalled();
+});
+it('rejects duplicating with an invalid task ID with 422', async () => {
+  const { app, repository } = setup();
+  expect((await request(app).post('/api/todos/abc/duplicate')).status).toBe(422);
+  expect(repository.get).not.toHaveBeenCalled();
+  expect(repository.create).not.toHaveBeenCalled();
+});
+
 afterEach(() => vi.useRealTimers());
 
 it('summarizes the stored tasks against the current date', async () => {
