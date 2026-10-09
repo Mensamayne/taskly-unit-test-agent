@@ -10,12 +10,12 @@ A custom agent that writes and updates Vitest unit tests for the Taskly backend 
 | PR workflow | `.github/workflows/unit-test-agent.yml` |
 | Edge cases and comparison with other agents | [`docs/edge-cases.md`](docs/edge-cases.md) |
 
-| Line coverage | Before | After |
+| Line coverage | Before | Now (main) |
 |---------------|--------|-------|
-| Backend | 33.0% (48 tests) | 97.4% (96 tests) |
-| Frontend | 47.7% (18 tests) | 97.6% (97 tests) |
+| Backend | 33.0% (48 tests) | 97.8% (120 tests) |
+| Frontend | 47.7% (18 tests) | 97.9% (125 tests) |
 
-Pull requests: [#1 harness](https://github.com/Mensamayne/taskly-unit-test-agent/pull/1), [#2 bootstrap tests](https://github.com/Mensamayne/taskly-unit-test-agent/pull/2), [#3 example feature](https://github.com/Mensamayne/taskly-unit-test-agent/pull/3), [#6](https://github.com/Mensamayne/taskly-unit-test-agent/pull/6) and [#7](https://github.com/Mensamayne/taskly-unit-test-agent/pull/7) hardening and verification, [#11](https://github.com/Mensamayne/taskly-unit-test-agent/pull/11) external-author dogfood (repair, write, update, publish, Actions skip notice), [#13](https://github.com/Mensamayne/taskly-unit-test-agent/pull/13) a feature tested by the real model in Actions.
+Pull requests: [#1 harness](https://github.com/Mensamayne/taskly-unit-test-agent/pull/1), [#2 bootstrap tests](https://github.com/Mensamayne/taskly-unit-test-agent/pull/2), [#3 example feature](https://github.com/Mensamayne/taskly-unit-test-agent/pull/3), [#6](https://github.com/Mensamayne/taskly-unit-test-agent/pull/6) and [#7](https://github.com/Mensamayne/taskly-unit-test-agent/pull/7) hardening and verification, [#11](https://github.com/Mensamayne/taskly-unit-test-agent/pull/11) external-author dogfood (repair, write, update, publish, Actions skip notice), [#13](https://github.com/Mensamayne/taskly-unit-test-agent/pull/13) and [#15](https://github.com/Mensamayne/taskly-unit-test-agent/pull/15) features tested by the real model in Actions (#15 also shows a follow-up push where the agent repairs only the one test the change broke).
 
 ## Main technical decisions
 
