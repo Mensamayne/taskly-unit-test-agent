@@ -3,6 +3,7 @@ import type { TodoStore } from './types.js';
 import { createSchema, updateSchema, idSchema } from './validators.js';
 import { computeStats } from './stats.js';
 import { duplicateInput } from './duplicate.js';
+import { completedIds } from './cleanup.js';
 
 export function createTodosRouter(repository: TodoStore) {
   const router = Router();
@@ -16,6 +17,13 @@ export function createTodosRouter(repository: TodoStore) {
   router.get('/stats', async (req, res) => {
     const today = new Date().toISOString().slice(0, 10);
     res.json(computeStats(await repository.list(), today));
+  });
+  router.delete('/completed', async (req, res) => {
+    let removed = 0;
+    for (const id of completedIds(await repository.list())) {
+      if (await repository.delete(id)) removed += 1;
+    }
+    res.json({ removed });
   });
   router.post('/', async (req, res) => {
     const result = createSchema.safeParse(req.body);
