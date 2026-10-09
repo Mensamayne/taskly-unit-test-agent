@@ -65,7 +65,7 @@ it('disables clearing completed tasks when none are completed', async () => {
       onClearCompleted={onClearCompleted}
     />,
   )
-  const clear = screen.getByRole('button', { name: 'Clear completed (0)' })
+  const clear = screen.getByRole('button', { name: 'Clear completed' })
   expect(clear).toBeDisabled()
   await user.click(clear)
   expect(onClearCompleted).not.toHaveBeenCalled()
