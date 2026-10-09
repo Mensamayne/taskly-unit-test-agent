@@ -11,7 +11,7 @@ import { renderTaskPacket, validateResult } from '../src/packet.mjs';
 import { planBootstrap, planPullRequest, sourceForTestPath, testPathFor } from '../src/plan.mjs';
 import { renderReport, verificationLine } from '../src/report.mjs';
 import { expectStatus, nextStep } from '../src/state.mjs';
-import { blocksWithoutExpect, extractTitles, findDisallowedMarkers, importSpecifiers, removedAssertionLines, unstubbedRandomness } from '../src/testfile.mjs';
+import { blocksWithoutExpect, extractTitles, findDisallowedMarkers, findingsInScope, importSpecifiers, removedAssertionLines, reviewScope, unstubbedRandomness } from '../src/testfile.mjs';
 import { safeEnv } from '../src/lib/exec.mjs';
 import { classifyFailure, explainFailure } from '../src/runner.mjs';
 import { matchedDefectClaims } from '../src/pipeline.mjs';
@@ -503,6 +503,19 @@ describe('review findings', async () => {
     assert.equal(isLimitError(new Error('Reached maximum number of turns (30)')), true);
     assert.equal(isLimitError(new Error('error_max_turns')), true);
     assert.equal(isLimitError(new Error('Not logged in')), false);
+  });
+
+  it('scopes the reviewer to tests added or changed in the run', () => {
+    const before = ["describe('router', () => {", "  it('lists todos', () => {});", "  it('deletes a todo', () => {});", '});'].join('\n');
+    const after = before.replace(/\n\}\);$/, "\n  it('duplicates a todo', () => {});\n});");
+    assert.deepEqual(reviewScope(before, after), ['duplicates a todo']);
+    assert.deepEqual(reviewScope(before, after, ['deletes a todo']), ['deletes a todo', 'duplicates a todo']);
+    assert.deepEqual(reviewScope(null, after), ['router', 'lists todos', 'deletes a todo', 'duplicates a todo']);
+    const findings = [
+      { test: 'lists todos', check: 'weak-assertion', note: 'pre-existing' },
+      { test: 'router > duplicates a todo', check: 'weak-assertion', note: 'added' },
+    ];
+    assert.deepEqual(findingsInScope(findings, ['duplicates a todo']).map((f) => f.note), ['added']);
   });
 
   it('flags a build that still does not typecheck', () => {

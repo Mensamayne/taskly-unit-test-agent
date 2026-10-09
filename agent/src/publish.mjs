@@ -153,10 +153,11 @@ export async function publish({ runDir, mode, repo, pr, workspace, runUrl, baseB
       } else {
         const branch = `test-agent/${run.runId}`;
         await git(workspace, ['push', 'origin', `HEAD:refs/heads/${branch}`]);
-        const url = (await gh(['pr', 'create', '--repo', repo, '--base', baseBranch, '--head', branch, '--title', 'test: raise unit test coverage (unit-test agent bootstrap)', '--body-file', '-'], { input: `${report}\nWorkflow run: ${runUrl}\n` })).trim();
+        const url = (await gh(['pr', 'create', '--repo', repo, '--base', baseBranch, '--head', branch, '--title', 'test: raise unit test coverage (unit-test agent bootstrap)', '--body-file', '-'], { input: `${report}\nWorkflow run: ${runUrl}\n`, token: process.env.PUSH_TOKEN || undefined })).trim();
         note = `Opened ${url}.`;
       }
-      // The push uses GITHUB_TOKEN, which does not trigger CI on the new commit; record what the author job verified.
+      // Record what the author job verified. CI also runs on the new commit when it was pushed with
+      // UNIT_TEST_AGENT_TOKEN; a GITHUB_TOKEN push starts no workflows, and then this status is all the commit has.
       await gh(['api', '-X', 'POST', `repos/${repo}/statuses/${commitSha}`, '--input', '-'], {
         input: JSON.stringify({
           state: 'success',
