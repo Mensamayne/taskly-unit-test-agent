@@ -1,0 +1,174 @@
+name: Unit test agent
+
+# Writes or updates unit tests for code changed in a pull request, verifies them, and reports on the PR.
+# Two jobs on purpose:
+#   author  - has the model key, a read-only token, and runs repository code (tests run in a sandbox)
+#   publish - has a write token, never runs repository code; applies a validated test-only patch
+# The harness and .claude/ (agent, skills) always come from the base branch, never from the PR.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths: ['frontend/src/**', 'backend/src/**']
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: bootstrap raises coverage on the default branch and opens a PR
+        type: choice
+        options: [bootstrap]
+        default: bootstrap
+      sides:
+        description: Packages to cover
+        type: choice
+        options: [backend,frontend, backend, frontend]
+        default: backend,frontend
+
+permissions: {}
+
+concurrency:
+  group: unit-test-agent-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  BASE_REF: ${{ github.event.pull_request.base.ref || github.event.repository.default_branch }}
+
+jobs:
+  author:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (!github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      run-id: ${{ steps.run.outputs.run-id }}
+      skipped: ${{ steps.key.outputs.skipped }}
+    steps:
+      - name: Check that the model key is configured
+        id: key
+        env:
+          HAS_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+        run: |
+          if [ "$HAS_KEY" != "true" ]; then
+            echo "::notice::Unit test agent skipped: the ANTHROPIC_API_KEY secret is not configured."
+            echo "Unit test agent skipped: the \`ANTHROPIC_API_KEY\` secret is not configured. The harness can still be run locally with \`uta run --author external\`." >> "$GITHUB_STEP_SUMMARY"
+            echo "skipped=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Check out the code under test
+        if: steps.key.outputs.skipped != 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          path: ws
+          persist-credentials: false
+      - name: Check out the trusted harness and agent configuration from the base branch
+        if: steps.key.outputs.skipped != 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.BASE_REF }}
+          path: trusted
+          sparse-checkout: |
+            agent
+            .claude
+          persist-credentials: false
+      - if: steps.key.outputs.skipped != 'true'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            ws/backend/package-lock.json
+            ws/frontend/package-lock.json
+            trusted/agent/package-lock.json
+      - name: Install dependencies (no secrets in this step)
+        if: steps.key.outputs.skipped != 'true'
+        run: |
+          npm ci --prefix ws/backend
+          npm ci --prefix ws/frontend
+          npm ci --prefix trusted/agent
+      - name: Pull the test sandbox image
+        if: steps.key.outputs.skipped != 'true'
+        run: docker pull "$(node -e "import('./trusted/agent/src/config.mjs').then(m => console.log(m.loadConfig({}).sandboxImage))")"
+      - name: Run the unit test agent
+        id: run
+        if: steps.key.outputs.skipped != 'true'
+        working-directory: ws
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          TEST_SANDBOX: docker
+          TEST_AGENT_MODEL: ${{ vars.TEST_AGENT_MODEL }}
+          MODE: ${{ github.event_name == 'pull_request' && 'pr' || 'bootstrap' }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          SIDES: ${{ inputs.sides || 'backend,frontend' }}
+        run: |
+          set +e
+          if [ "$MODE" = "pr" ]; then
+            node ../trusted/agent/src/cli.mjs run --mode pr --base "$BASE_SHA" --head "$HEAD_SHA" --author sdk --config-root ../trusted
+          else
+            node ../trusted/agent/src/cli.mjs run --mode bootstrap --sides "$SIDES" --author sdk --config-root ../trusted
+          fi
+          status=$?
+          if [ -f .uta-runs/latest ]; then
+            run_id="$(cat .uta-runs/latest)"
+            echo "run-id=$run_id" >> "$GITHUB_OUTPUT"
+            [ -f ".uta-runs/$run_id/report.md" ] && cat ".uta-runs/$run_id/report.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit $status
+      - name: Upload the run (report, patch, state, transcripts)
+        if: always() && steps.run.outputs.run-id != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: unit-test-agent-run
+          path: ws/.uta-runs/${{ steps.run.outputs.run-id }}/
+          include-hidden-files: true
+          retention-days: 14
+
+  publish:
+    needs: author
+    if: >-
+      always() && needs.author.result != 'skipped' && needs.author.result != 'cancelled' &&
+      needs.author.outputs.skipped != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+      statuses: write
+    steps:
+      - name: Check out the trusted publisher from the base branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.BASE_REF }}
+          path: trusted
+          sparse-checkout: agent
+          persist-credentials: false
+      - name: Check out the branch to publish to (data only, never executed)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+          path: ws
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: Download the run
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: unit-test-agent-run
+          path: run
+      - name: Validate the patch, publish tests, and update the PR comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODE: ${{ vars.TEST_AGENT_MODE || 'commit' }}
+          PR: ${{ github.event.pull_request.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          HAS_RUN: ${{ steps.download.outcome == 'success' }}
+        run: |
+          args=(--mode "$MODE" --repo "$GITHUB_REPOSITORY" --workspace ws --run-url "$RUN_URL" --base "$BASE_REF")
+          [ -n "$PR" ] && args+=(--pr "$PR")
+          [ "$HAS_RUN" = "true" ] && args+=(--run run)
+          node trusted/agent/src/publish.mjs "${args[@]}"
