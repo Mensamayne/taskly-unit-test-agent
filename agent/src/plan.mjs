@@ -99,6 +99,12 @@ export function planPullRequest({ files, added, baseline, exists, maxTargets }) 
       noops.push({ path, reason: 'no executable lines changed' });
       continue;
     }
+    // A new module gets its own unit tests even when other tests happen to execute it:
+    // indirect coverage (for example a router test calling a helper) is not a test of the unit.
+    if (status === 'A' && action === 'write') {
+      candidates.push({ path, side, action, reason: 'new file without its own test file', testPath, changedLines: changed, linesToCover: changed, priority: changed.length });
+      continue;
+    }
     const uncovered = changed.filter((l) => !cov.covered.has(l));
     if (!uncovered.length) {
       noops.push({ path, reason: 'changed lines already covered by passing tests' });

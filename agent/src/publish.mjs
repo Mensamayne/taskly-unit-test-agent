@@ -46,7 +46,10 @@ export function validatePatch(patch) {
 }
 
 async function gh(args, { input, token } = {}) {
-  const res = await runCommand('gh', args, { input, env: { ...process.env, GH_TOKEN: token ?? process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN }, timeoutMs: 60_000 });
+  const auth = token ?? process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN;
+  // Without a token in the environment, gh falls back to its own stored login (local use).
+  const env = auth ? { ...process.env, GH_TOKEN: auth } : process.env;
+  const res = await runCommand('gh', args, { input, env, timeoutMs: 60_000 });
   if (res.exitCode !== 0) throw new HarnessError('gh_failed', `gh ${args.slice(0, 3).join(' ')}: ${res.stderr.trim() || res.stdout.trim()}`);
   return res.stdout;
 }

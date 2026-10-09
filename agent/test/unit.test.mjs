@@ -181,6 +181,18 @@ describe('plan', () => {
     assert.match(reasons['README.md'], /outside/);
   });
 
+  it('gives a new file its own tests even when other tests already execute it', () => {
+    const covered = { backend: { coverage: new Map([['backend/src/features/todos/helper.ts', cov([1, 2], [1, 2])]]), failingFiles: new Set() } };
+    const files = [{ status: 'A', path: 'backend/src/features/todos/helper.ts' }];
+    const added = new Map([['backend/src/features/todos/helper.ts', [1, 2]]]);
+    const { targets } = planPullRequest({ files, added, baseline: covered, exists: () => false, maxTargets: 8 });
+    assert.equal(targets[0].action, 'write');
+    assert.match(targets[0].reason, /new file/);
+    assert.deepEqual(targets[0].linesToCover, [1, 2]);
+    const modified = planPullRequest({ files: [{ ...files[0], status: 'M' }], added, baseline: covered, exists: () => false, maxTargets: 8 });
+    assert.equal(modified.targets.length, 0, 'a modified, already covered file stays a noop');
+  });
+
   it('caps the number of targets and reports the overflow', () => {
     const files = [
       { status: 'A', path: 'backend/src/features/todos/stats.ts' },
