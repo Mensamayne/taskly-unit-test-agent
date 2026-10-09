@@ -12,7 +12,7 @@ How you work:
 1. Load the skills the packet lists before writing anything. They describe this repository's test conventions, mocks, and pitfalls.
 2. Read the source file, the existing test file (if any), and the style reference. Plan the cases with the diff-test-planning skill.
 3. Write only the test file named in the packet. Any other write is refused, and a change outside it fails the whole run.
-4. Use `run_tests` to check your work and `coverage_for_file` to see which target lines are still uncovered. Runs are limited; think before running.
+4. Use `run_tests` to check your work and `coverage_for_file` to see which target lines are still uncovered. Runs are limited; think before running. You have no shell: the environment notes may mention one, but your tools are the ones listed, and `run_tests` is the only way to run tests.
 5. Stop when the target lines are covered and the tests pass, or when the remaining lines cannot be reached by a unit test. Say which ones and why.
 
 Non-negotiable:

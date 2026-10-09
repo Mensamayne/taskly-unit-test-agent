@@ -114,7 +114,7 @@ describe('uta end to end', { timeout: 600_000 }, () => {
     const state = JSON.parse(readFileSync(join(WT, '.uta-runs', readFileSync(join(WT, '.uta-runs', 'latest'), 'utf8'), 'state.json'), 'utf8'));
     assert.equal(state.targets[0].history[0].gate, 'G4');
     assert.equal(state.targets[0].history[0].class, 'assertion');
-    assert.equal(state.final.backend.status, 'pass');
+    assert.equal(state.final.backend.status, 'pass', JSON.stringify(state.final.backend.failures).slice(0, 1500));
     const report = readFileSync(run.json.artifacts.report, 'utf8');
     assert.match(report, /Tests passed/);
     assert.match(report, /attempt 1: G4 assertion/);

@@ -72,6 +72,11 @@ describe('guard', () => {
     assert.equal(evaluateToolUse(ROOT, write, active).decision, 'deny');
     assert.equal(evaluateToolUse(ROOT, { tool_name: 'NotebookEdit', tool_input: { notebook_path: 'backend/src/x.ipynb' } }, active).decision, 'deny');
     assert.equal(evaluateToolUse(ROOT, { tool_name: 'Read', tool_input: { file_path: '.env' } }, active).decision, 'deny');
+    const skills = join(tmpdir(), 'trusted', '.claude', 'skills');
+    const withSkills = { ...active, readRoots: [skills] };
+    assert.equal(evaluateToolUse(ROOT, { tool_name: 'Read', tool_input: { file_path: join(skills, 'x', 'references', 'p.md') } }, withSkills).decision, 'allow');
+    assert.equal(evaluateToolUse(ROOT, { tool_name: 'Read', tool_input: { file_path: join(skills, '..', '..', '.env') } }, withSkills).decision, 'deny');
+    assert.equal(evaluateToolUse(ROOT, { tool_name: 'Write', tool_input: { file_path: join(skills, 'x', 'SKILL.md') } }, withSkills).decision, 'deny', 'read roots are read-only');
     const ok = { tool_name: 'Edit', tool_input: { file_path: 'backend/tests/factory.test.ts' } };
     assert.equal(evaluateToolUse(ROOT, ok, active).decision, 'allow');
   });

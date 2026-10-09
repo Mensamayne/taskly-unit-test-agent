@@ -39,6 +39,22 @@ A scripted stand-in for the Messages API (`agent/test/support/fake-anthropic.mjs
 - The agent process read the user's `~/.claude` (memory, settings, user skills). It now gets an isolated home directory per run.
 - `ANTHROPIC_BASE_URL` was not forwarded to the agent process.
 
+## What the agent receives
+
+Recorded from every request the Agent SDK and Claude Code process sent to a scripted Messages API during a full run (two targets, one repair, the reviewer):
+
+| Channel | Content |
+|---------|---------|
+| System prompt | SDK preamble plus the body of `.claude/agents/unit-test-author.md` (reviewer: `test-reviewer.md`) |
+| First user message | The task packet: target, the only writable file, changed and uncovered lines, the file diff, what fails on the head commit (repairs), existing test titles, style reference, skills, rules, tools, result shape |
+| Injected context | Working directory, platform, model, the enabled skills only (2-3, none of the CLI's built-in skills), the remaining USD budget, today's date |
+| Tools | `Read`, `Grep`, `Glob`, `Write`, `Edit`, `Skill`, `StructuredOutput`, and the three MCP tools; the reviewer has no write tools |
+| Skill tool | The full `SKILL.md`; a skill outside the target's list is refused; reference files are readable from the trusted checkout |
+| Hook refusals | Writes outside the test file, reads of `.env` and `.uta-runs`, paths outside the workspace and the skills |
+| Repair | The resumed session keeps the conversation and gets a new packet with the gate feedback and a fresh tool budget |
+
+Nothing from the user's home directory, `.cursor/`, local notes, or credentials appears in any request. The recording found two problems, both fixed: skill reference files were refused by the hook (the skills live in the trusted checkout, outside the workspace), and the reviewer session had no read guard.
+
 ## Runs that failed during development
 
 - Two runs failed on G1 (scope): while authoring one target, the author touched another target's file (once by reformatting an accepted file, once by writing the next target's file early). The whole run was rejected and replayed. The harness now formats frontend test files itself before the gates.
