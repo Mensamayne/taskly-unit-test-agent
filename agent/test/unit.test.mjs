@@ -12,6 +12,7 @@ import { planBootstrap, planPullRequest, sourceForTestPath, testPathFor } from '
 import { renderReport, verificationLine } from '../src/report.mjs';
 import { expectStatus, nextStep } from '../src/state.mjs';
 import { blocksWithoutExpect, extractTitles, findDisallowedMarkers, importSpecifiers, removedAssertionLines, unstubbedRandomness } from '../src/testfile.mjs';
+import { safeEnv } from '../src/lib/exec.mjs';
 import { classifyFailure, explainFailure } from '../src/runner.mjs';
 import { matchedDefectClaims } from '../src/pipeline.mjs';
 
@@ -387,6 +388,27 @@ describe('publish patch validation', async () => {
 });
 
 describe('edge cases', () => {
+  it('scrubs secrets from the env passed to repository code', () => {
+    const env = safeEnv(
+      { EXTRA: 'ok' },
+      {
+        PATH: '/bin',
+        ANTHROPIC_API_KEY: 'sk-ant-secret',
+        GITHUB_TOKEN: 'ghp_secret',
+        GH_TOKEN: 'gh_secret',
+        OPENAI_API_KEY: 'sk-openai',
+        HOME: '/home/uta',
+      },
+    );
+    assert.equal(env.PATH, '/bin');
+    assert.equal(env.HOME, '/home/uta');
+    assert.equal(env.EXTRA, 'ok');
+    assert.equal(env.CI, 'true');
+    for (const key of ['ANTHROPIC_API_KEY', 'GITHUB_TOKEN', 'GH_TOKEN', 'OPENAI_API_KEY']) {
+      assert.equal(env[key], undefined, key);
+    }
+  });
+
   it('rejects unstubbed randomness but allows stubbed', () => {
     assert.deepEqual(unstubbedRandomness('expect(Math.random()).toBeLessThan(1)'), ['Math.random()']);
     assert.deepEqual(unstubbedRandomness("vi.spyOn(Math, 'random').mockReturnValue(0.1); f(Math.random())"), []);
