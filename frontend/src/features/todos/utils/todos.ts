@@ -47,6 +47,11 @@ export function selectTodos(
         return (
           priorityOrder[a.priority] - priorityOrder[b.priority] || b.id - a.id
         )
+      if (sort === 'title')
+        return (
+          a.title.localeCompare(b.title, 'en', { sensitivity: 'base' }) ||
+          b.id - a.id
+        )
       if (sort === 'due')
         return (
           (a.due_date ?? '9999').localeCompare(b.due_date ?? '9999') ||
