@@ -201,7 +201,7 @@ export async function gateTarget({ root, state, targetId, config }) {
   // Resubmitting a file that already failed cannot fix it, and with a flaky test it only
   // buys another roll of the dice. Reject without running anything.
   const hash = fileHash(root, target.testPath);
-  if (target.failedHashes.includes(hash)) {
+  if (hash !== 'missing' && target.failedHashes.includes(hash)) {
     const gate = { passed: false, gate: 'G0', class: 'no-progress', message: 'the test file is identical to an attempt that already failed', failures: [], checks: [] };
     target.history.push({ attempt: target.attempts, gate: gate.gate, class: gate.class, message: gate.message, checks: [], coverage: null });
     reject(root, state, target, 'rejected: resubmitted a test file that already failed');
@@ -232,7 +232,7 @@ export async function gateTarget({ root, state, targetId, config }) {
     reject(root, state, target, `not verified: infrastructure error at ${gate.gate} (${gate.message})`);
     return { outcome: 'rejected', gate };
   }
-  target.failedHashes.push(hash);
+  if (hash !== 'missing') target.failedHashes.push(hash);
 
   const claims = gate.class === 'assertion' ? matchedDefectClaims(target.result?.suspectedDefects ?? [], gate.failures) : [];
   if (claims.length) {

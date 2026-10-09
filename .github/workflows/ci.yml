@@ -46,7 +46,7 @@ jobs:
   agent:
     name: unit-test agent harness
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -58,10 +58,12 @@ jobs:
           cache-dependency-path: |
             backend/package-lock.json
             frontend/package-lock.json
-      - name: Install app dependencies (the harness tests run real Vitest and tsc)
+            agent/package-lock.json
+      - name: Install dependencies (the harness tests run real Vitest, tsc, the Agent SDK, and Docker)
         run: |
           npm ci --prefix backend
           npm ci --prefix frontend
+          npm ci --prefix agent
       - name: Harness tests
         working-directory: agent
         run: npm test
