@@ -1,12 +1,17 @@
-import { Plus } from 'lucide-react'
+import { CheckCheck, Plus } from 'lucide-react'
 import { Button, Heading, Text } from '../../../design-system'
+import { clearCompletedLabel } from '../utils/todos'
 
 export function TodosHeader({
   disabled,
+  completedCount,
   onCreate,
+  onClearCompleted,
 }: {
   disabled: boolean
+  completedCount: number
   onCreate: () => void
+  onClearCompleted: () => void
 }) {
   return (
     <section className="row spread" aria-labelledby="page-title">
@@ -14,10 +19,20 @@ export function TodosHeader({
         <Heading id="page-title">Tasks</Heading>
         <Text muted>Create, organize, and complete tasks.</Text>
       </div>
-      <Button disabled={disabled} onClick={onCreate}>
-        <Plus size={18} aria-hidden="true" />
-        New task
-      </Button>
+      <div className="row compact">
+        <Button
+          variant="secondary"
+          disabled={disabled || completedCount === 0}
+          onClick={onClearCompleted}
+        >
+          <CheckCheck size={18} aria-hidden="true" />
+          {clearCompletedLabel(completedCount)}
+        </Button>
+        <Button disabled={disabled} onClick={onCreate}>
+          <Plus size={18} aria-hidden="true" />
+          New task
+        </Button>
+      </div>
     </section>
   )
 }

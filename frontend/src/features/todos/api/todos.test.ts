@@ -72,6 +72,19 @@ it('propagates a failure when duplicating a task', async () => {
   await expect(todosApi.duplicate(99)).rejects.toThrow('Not found')
 })
 
+it('clears completed tasks with a DELETE and returns the removed count', async () => {
+  vi.mocked(request).mockResolvedValue({ removed: 3 })
+  await expect(todosApi.clearCompleted()).resolves.toEqual({ removed: 3 })
+  expect(request).toHaveBeenCalledWith('/todos/completed', {
+    method: 'DELETE',
+  })
+})
+
+it('propagates a failure when clearing completed tasks', async () => {
+  vi.mocked(request).mockRejectedValue(new Error('Server error'))
+  await expect(todosApi.clearCompleted()).rejects.toThrow('Server error')
+})
+
 it('fetches the task statistics with the abort signal', async () => {
   const signal = new AbortController().signal
   const stats = { total: 2, completed: 1, active: 1, overdue: 0 }

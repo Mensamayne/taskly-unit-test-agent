@@ -6,4 +6,5 @@ export const todoKeys = {
   update: ['todos', 'update'] as const,
   delete: ['todos', 'delete'] as const,
   duplicate: ['todos', 'duplicate'] as const,
+  clearCompleted: ['todos', 'clear-completed'] as const,
 }
