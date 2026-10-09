@@ -1,0 +1,17 @@
+{
+  "name": "taskly-unit-test-agent",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Unit-test agent for Taskly: deterministic pipeline, replaceable author, acceptance gates",
+  "bin": {
+    "uta": "./src/cli.mjs"
+  },
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "uta": "node ./src/cli.mjs",
+    "test": "node --test --test-concurrency=1 \"test/*.test.mjs\""
+  }
+}
