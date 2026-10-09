@@ -6,7 +6,7 @@ import { HarnessError } from './lib/errors.mjs';
 import { runCommand } from './lib/exec.mjs';
 import { addedLines, changedFiles, commitAuthorEmail, fileDiff, resolveCommit, statusEntries } from './lib/git.mjs';
 import { renderTaskPacket, validateResult } from './packet.mjs';
-import { planBootstrap, planPullRequest } from './plan.mjs';
+import { isTestFile, planBootstrap, planPullRequest } from './plan.mjs';
 import { writeReport } from './report.mjs';
 import { runTsc, runVitest, tscKey } from './runner.mjs';
 import { ensureDir } from './sandbox.mjs';
@@ -70,6 +70,11 @@ async function baselineFor(root, runId, side, config) {
       linePercent: executable ? Math.round((1000 * covered) / executable) / 10 : 100,
       failingTests: suite.failures.map((f) => `${f.file}|${f.title}`),
       failingFiles: [...new Set(suite.failures.map((f) => f.file))],
+      // What a repair needs to know up front: which tests fail and which test files do not compile.
+      problems: [
+        ...suite.failures.slice(0, 100).map((f) => ({ file: f.file, title: f.title, message: f.message.split(/\r?\n/)[0].slice(0, 300) })),
+        ...tsc.errors.filter((e) => isTestFile(e.file)).slice(0, 100).map((e) => ({ file: e.file, title: `${e.file}:${e.line} does not compile`, message: `${e.code}: ${e.message}`.slice(0, 300) })),
+      ],
       tscErrors: tsc.errors.map(tscKey),
       coverageFile: suite.coverageFile,
       files: Object.fromEntries([...coverage].map(([p, c]) => [p, Math.round(linePercent(c))])),
@@ -110,7 +115,7 @@ export async function startRun({ root, mode, base, head = 'HEAD', sides, driver,
   for (const side of needed) {
     const { coverage, summary } = await baselineFor(root, runId, side, config);
     state.baseline[side] = summary;
-    forPlan[side] = { coverage, failingFiles: new Set(summary.failingFiles) };
+    forPlan[side] = { coverage, failingFiles: new Set(summary.problems.map((p) => p.file)) };
   }
 
   const exists = (p) => existsSync(join(root, p));
@@ -121,6 +126,9 @@ export async function startRun({ root, mode, base, head = 'HEAD', sides, driver,
   state.targets = plan.targets.map((t) => ({
     ...t, status: 'pending', attempts: 0, repairs: 0, toolRuns: 0, history: [], feedback: null, result: null, outcome: null,
   }));
+  for (const t of state.targets) {
+    if (t.action === 'repair-existing') t.knownProblems = state.baseline[t.side].problems.filter((p) => p.file === t.testPath).slice(0, 20);
+  }
   if (mode === 'pr') {
     // The author sees what changed, not only which lines: it decides whether an old assertion
     // is outdated by the change (repair-existing) or the change is a bug (suspected defect).
@@ -280,6 +288,7 @@ async function finalize(root, state, config) {
       tests: suite.numTests,
       failures: suite.failures.slice(0, 10),
       newTypeErrors: tsc.errors.filter((e) => !known.has(tscKey(e))).length,
+      typeErrors: tsc.errors.length,
       sideEffects: effects.changed,
     };
     if (effects.changed.length) state.final[side].status = 'side-effect';

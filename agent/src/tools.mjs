@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { formatRanges, loadLineCoverage } from './coverage.mjs';
 import { HarnessError } from './lib/errors.mjs';
-import { buildChangeContext } from './packet.mjs';
+import { buildChangeContext, groupFailures } from './packet.mjs';
 import { runVitest } from './runner.mjs';
 import { expectStatus, getTarget, saveRun, targetDir } from './state.mjs';
 import { revertSideEffects } from './workspace.mjs';
@@ -34,7 +34,7 @@ export async function toolRunTests({ root, state, targetId, config }) {
   return {
     status: effects.changed.length ? 'side-effect' : run.status,
     numTests: run.numTests,
-    failures: run.failures.slice(0, 10),
+    failures: groupFailures(run.failures).slice(0, 10),
     durationMs: run.durationMs,
     runsLeft: config.budgets.maxToolRuns - target.toolRuns,
     ...(effects.changed.length

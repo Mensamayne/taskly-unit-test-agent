@@ -96,11 +96,13 @@ export async function runGates({ root, state, target, config }) {
   // G3 typecheck: no new errors compared with the baseline.
   const tsc = await runTsc({ root, side: target.side, config });
   if (tsc.failedToRun) return fail('G3', 'infra', `tsc did not run: ${tsc.stderrTail}`);
+  // Errors elsewhere that predate the run are tolerated; the test file itself must compile,
+  // including errors the pull request introduced into it before the author touched it.
   const known = new Set(baseline.tscErrors);
-  const fresh = tsc.errors.filter((e) => !known.has(tscKey(e)));
+  const fresh = tsc.errors.filter((e) => e.file === target.testPath || !known.has(tscKey(e)));
   if (fresh.length) {
     record('G3', false, fresh);
-    return fail('G3', 'typecheck', `${fresh.length} new type error(s)`, {
+    return fail('G3', 'typecheck', `${fresh.length} type error(s) in the test file or new elsewhere`, {
       failures: fresh.slice(0, 10).map((e) => ({ title: `${e.file}:${e.line}`, message: `${e.code}: ${e.message}`, class: 'typecheck' })),
     });
   }

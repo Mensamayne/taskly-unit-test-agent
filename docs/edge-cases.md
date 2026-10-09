@@ -26,6 +26,10 @@ The harness was driven from the author's side with tests made to fail, hang, che
 | PR breaks existing tests | Baseline keeps coverage (`reportOnFailure`); the target becomes `repair-existing` | fixed |
 | Aborted or failed run | Report said "no source changes". Now "Could not verify the result: the run failed (code)" | fixed |
 | Author cannot see what changed | The task packet includes the unified diff of the file, not only line numbers | fixed |
+| PR breaks the types of an existing test (a new interface method its fake lacks) | Tests still passed, so it was `update`; a cast workaround passed G3 because the error predated the author, and the report said "Tests passed" while `npm run typecheck` failed. Now the target is `repair-existing`, the packet shows the compile error, the test file must compile completely, and the report says "typecheck failed" if errors remain | fixed |
+| Repair target without context | The packet now lists what fails on the head commit (grouped by root cause) and the new lines still uncovered | fixed |
+| Style reference picked alphabetically | The existing test file, or a test of a module in the same source directory | fixed |
+| SDK session reaches its USD or turn limit | The SDK throws; the whole run was aborted and the cost lost. Now the session ends, the cost is recorded (the full allowance if unreported), and the run continues within its budget | fixed |
 
 ## Agent SDK wiring
 
@@ -40,6 +44,20 @@ A scripted stand-in for the Messages API (`agent/test/support/fake-anthropic.mjs
 - Two runs failed on G1 (scope): while authoring one target, the author touched another target's file (once by reformatting an accepted file, once by writing the next target's file early). The whole run was rejected and replayed. The harness now formats frontend test files itself before the gates.
 - A PR that broke existing tests could not be planned, because Vitest skips the coverage report when tests fail.
 - A new helper covered only indirectly (through a router test) was planned as `noop`. Every new file now gets its own tests.
+
+## Load test of the limits
+
+Scripted models drove the `sdk` driver against eight targets:
+
+| Limit | Setting | Observed |
+|-------|---------|----------|
+| USD per target | $1 | each session stopped with `error_max_budget_usd`; no repair session started on that target |
+| USD per run | $6 | stopped after four targets at $6.40; the rest "not attempted" |
+| Turns | 5 (floor; 3 requested) | sessions stopped with `error_max_turns`; the repair resumed the session; the second identical failure stopped the target |
+| Targets per run | 500 requested | clamped to 20; 20 overflow files listed in the report |
+| Diff size | 3000-line file | diff truncated at 6000 characters; packet about 8 KB |
+
+USD limits are checked between turns, so a session can exceed its allowance by one turn (bounded by the context window).
 
 ## Comparison with other unit-test agents
 

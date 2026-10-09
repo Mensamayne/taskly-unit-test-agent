@@ -42,8 +42,21 @@ export function validateResult(raw) {
   return out;
 }
 
-/** Nearest existing test file to imitate for style. */
+/**
+ * Existing test file to imitate for style. When the target's own test file exists, that file
+ * is the reference. Otherwise: frontend, the nearest test up the directory tree; backend (flat
+ * tests), the test of another module from the same source directory, then any backend test.
+ */
 export function siblingTest(root, target) {
+  if (existsSync(join(root, target.testPath))) return target.testPath;
+  if (target.side === 'backend') {
+    const srcDir = dirOf(target.path);
+    const neighbours = existsSync(join(root, srcDir)) ? readdirSync(join(root, srcDir)).filter((f) => /\.ts$/.test(f)).sort() : [];
+    for (const file of neighbours) {
+      const candidate = `backend/tests/${file.replace(/\.ts$/, '.test.ts')}`;
+      if (candidate !== target.testPath && existsSync(join(root, candidate))) return candidate;
+    }
+  }
   const dir = target.side === 'backend' ? 'backend/tests' : dirOf(target.testPath);
   const walk = [dir];
   if (target.side === 'frontend') {
@@ -62,6 +75,24 @@ export function siblingTest(root, target) {
     if (found.length) return `${d}/${found[0]}`;
   }
   return null;
+}
+
+/**
+ * Collapse failures that share the same first message line ("9 tests: No QueryClient set")
+ * so one root cause does not crowd out the others.
+ * @param {Array<{ title: string, message: string }>} failures
+ */
+export function groupFailures(failures) {
+  const groups = new Map();
+  for (const f of failures) {
+    const key = String(f.message).split(/\r?\n/)[0];
+    if (!groups.has(key)) groups.set(key, { titles: [], message: f.message });
+    groups.get(key).titles.push(f.title);
+  }
+  return [...groups.values()].map((g) => ({
+    label: g.titles.length === 1 ? g.titles[0] : `${g.titles.length} tests (${g.titles.slice(0, 3).map((t) => `"${t}"`).join(', ')}${g.titles.length > 3 ? ', ...' : ''})`,
+    message: g.message,
+  }));
 }
 
 export function skillsFor(target, hasFeedback) {
@@ -120,9 +151,15 @@ export function renderTaskPacket({ root, state, target, budgets }) {
   lines.push(`- Action: ${target.action}. Reason: ${target.reason}.`);
   if (state.mode === 'pr') lines.push(`- Changed executable lines in this pull request: ${ctx.changedLines || 'none'}`);
   if (target.action !== 'repair-existing') lines.push(`- Lines to cover: ${ctx.linesToCover}`);
+  else if (ctx.linesToCover) lines.push(`- New lines not yet covered (cover them too if a unit test can): ${ctx.linesToCover}`);
   lines.push(`- Existing tests in the test file: ${ctx.existingTestTitles.length ? ctx.existingTestTitles.map((t) => `"${t}"`).join(', ') : 'none'}`);
-  if (ctx.styleReference) lines.push(`- Style reference: \`${ctx.styleReference}\``);
+  if (ctx.styleReference === target.testPath) lines.push('- Style reference: the existing test file; extend it in the same style.');
+  else if (ctx.styleReference) lines.push(`- Style reference: \`${ctx.styleReference}\``);
   if (ctx.diff) lines.push('', '## Change in this pull request', '', '```diff', ctx.diff, '```');
+  if (target.knownProblems?.length) {
+    lines.push('', '## What fails on the head commit', '');
+    for (const group of groupFailures(target.knownProblems)) lines.push(`- ${group.label}: ${group.message}`);
+  }
   lines.push('', '## Skills to load first', '');
   for (const s of packet.skills) lines.push(`- ${s.name}: \`${s.path}\``);
   lines.push('', '## Rules', '');
@@ -142,7 +179,7 @@ export function renderTaskPacket({ root, state, target, budgets }) {
   if (feedback) {
     lines.push('', `## Feedback from attempt ${target.attempts - 1}`, '');
     lines.push(`Gate ${feedback.gate} failed (${feedback.class}): ${feedback.message}`);
-    for (const f of (feedback.failures ?? []).slice(0, 5)) lines.push('', `- ${f.title}`, '```', f.message, '```');
+    for (const group of groupFailures(feedback.failures ?? []).slice(0, 5)) lines.push('', `- ${group.label}`, '```', group.message, '```');
   }
   lines.push('', '## Finish', '');
   lines.push(`Reply with one JSON object (external drivers: save it and run \`uta submit --target ${target.id} --result <file>\`).`);

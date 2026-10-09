@@ -23,7 +23,9 @@ export function verificationLine(state) {
   if (state.stage === 'failed') return `Could not verify the result: the run failed (${state.failure?.code ?? 'unknown'})`;
   if (!sides.length) return 'Tests were not run: no source changes in frontend/ or backend/';
   const ok = sides.every((s) => state.final[s].status === 'pass' && state.final[s].newTypeErrors === 0);
-  return ok ? 'Tests passed' : 'Tests failed';
+  if (!ok) return 'Tests failed';
+  // Type errors the pull request brought in and nobody fixed: tests pass, the build does not.
+  return sides.some((s) => (state.final[s].typeErrors ?? 0) > 0) ? 'Tests passed, typecheck failed' : 'Tests passed';
 }
 
 /** Run summary without bulky internals, safe to publish as an artifact. */
@@ -68,6 +70,7 @@ export function renderReport(state) {
   lines.push('**Verification**', '');
   for (const [side, f] of Object.entries(state.final ?? {})) {
     lines.push(`- ${side}: full suite ${f.status} (${f.tests} tests), new type errors: ${f.newTypeErrors}`);
+    if (f.typeErrors > f.newTypeErrors) lines.push(`  - typecheck: ${f.typeErrors} error(s) remain that existed before the agent ran; \`npm run typecheck\` fails in ${side}/`);
     if (f.sideEffects?.length) lines.push(`  - tests changed files outside the test files (reverted): ${f.sideEffects.join(', ')}`);
   }
   lines.push('- Per target: tsc --noEmit, vitest run on the test file (repeated, shuffled), scoped coverage, full package suite');
