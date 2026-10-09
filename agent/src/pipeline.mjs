@@ -4,14 +4,14 @@ import { linePercent, loadLineCoverage } from './coverage.mjs';
 import { runGates } from './gates.mjs';
 import { HarnessError } from './lib/errors.mjs';
 import { runCommand } from './lib/exec.mjs';
-import { addedLines, changedFiles, commitAuthorEmail, resolveCommit, statusEntries } from './lib/git.mjs';
+import { addedLines, changedFiles, commitAuthorEmail, fileDiff, resolveCommit, statusEntries } from './lib/git.mjs';
 import { renderTaskPacket, validateResult } from './packet.mjs';
 import { planBootstrap, planPullRequest } from './plan.mjs';
 import { writeReport } from './report.mjs';
 import { runTsc, runVitest, tscKey } from './runner.mjs';
 import { ensureDir } from './sandbox.mjs';
 import { activeMarker, clearActive, expectStatus, getTarget, newRunId, runDir, saveRun, setActive, targetDir } from './state.mjs';
-import { readOptional, restoreFile, takeSnapshot } from './workspace.mjs';
+import { fileHash, readOptional, restoreFile, revertSideEffects, takeSnapshot } from './workspace.mjs';
 
 const SIDES = /** @type {const} */ (['backend', 'frontend']);
 
@@ -121,6 +121,11 @@ export async function startRun({ root, mode, base, head = 'HEAD', sides, driver,
   state.targets = plan.targets.map((t) => ({
     ...t, status: 'pending', attempts: 0, repairs: 0, toolRuns: 0, history: [], feedback: null, result: null, outcome: null,
   }));
+  if (mode === 'pr') {
+    // The author sees what changed, not only which lines: it decides whether an old assertion
+    // is outdated by the change (repair-existing) or the change is a bug (suspected defect).
+    for (const t of state.targets) t.diff = await fileDiff(root, pre.baseSha, pre.headSha, t.path);
+  }
   state.stage = 'authoring';
   saveRun(root, state);
   return state;
@@ -158,13 +163,57 @@ export function submitResult(root, state, targetId, raw) {
 }
 
 /**
+ * A suspected-defect claim counts only if it names a test that actually failed on an assertion.
+ * Otherwise an author could escape a repair by declaring any failure a bug in the source.
+ * @param {Array<{ test: string }>} claims
+ * @param {Array<{ title: string, class: string }>} failures
+ */
+export function matchedDefectClaims(claims, failures) {
+  const norm = (t) => t.trim().toLowerCase();
+  const failed = failures.filter((f) => f.class === 'assertion').map((f) => norm(f.title));
+  return claims.filter((c) => {
+    const claim = norm(c.test);
+    return claim.length > 0 && failed.some((title) => title === claim || title.endsWith(claim) || claim.endsWith(title));
+  });
+}
+
+/** Identity of a gate failure, used to detect repairs that make no progress. */
+function failureSignature(gate) {
+  return JSON.stringify([gate.gate, gate.class, gate.message, gate.failures.map((f) => `${f.title}|${f.message.split(/\r?\n/)[0]}`)]);
+}
+
+/** Reject a target and put its test file back as it was before the run. */
+function reject(root, state, target, outcome) {
+  restoreFile(root, target.testPath, target.originalTestContent);
+  Object.assign(target, { status: 'rejected', outcome });
+  saveRun(root, state);
+}
+
+/**
  * S5 gate + repair decision for one submitted target.
  * @returns {Promise<{ outcome: 'accepted' | 'repair' | 'rejected' | 'run-failed', gate: any }>}
  */
 export async function gateTarget({ root, state, targetId, config }) {
   const target = getTarget(state, targetId);
   expectStatus(target, ['submitted'], 'gate');
-  const gate = await runGates({ root, state, target, config });
+  target.failedHashes ??= [];
+
+  // Resubmitting a file that already failed cannot fix it, and with a flaky test it only
+  // buys another roll of the dice. Reject without running anything.
+  const hash = fileHash(root, target.testPath);
+  if (target.failedHashes.includes(hash)) {
+    const gate = { passed: false, gate: 'G0', class: 'no-progress', message: 'the test file is identical to an attempt that already failed', failures: [], checks: [] };
+    target.history.push({ attempt: target.attempts, gate: gate.gate, class: gate.class, message: gate.message, checks: [], coverage: null });
+    reject(root, state, target, 'rejected: resubmitted a test file that already failed');
+    return { outcome: 'rejected', gate };
+  }
+
+  let gate = await runGates({ root, state, target, config });
+  if (gate.class === 'infra') {
+    // The environment failed, not the test. Try once more before giving up, without charging a repair.
+    target.history.push({ attempt: target.attempts, gate: gate.gate, class: gate.class, message: gate.message, checks: gate.checks, coverage: null });
+    gate = await runGates({ root, state, target, config });
+  }
   target.history.push({ attempt: target.attempts, gate: gate.gate, class: gate.class, message: gate.message, checks: gate.checks, coverage: gate.coverage ?? null });
 
   if (gate.passed) {
@@ -179,22 +228,38 @@ export async function gateTarget({ root, state, targetId, config }) {
     saveRun(root, state);
     return { outcome: 'run-failed', gate };
   }
-  const claimsDefect = gate.class === 'assertion' && (target.result?.suspectedDefects?.length ?? 0) > 0;
-  if (claimsDefect) {
-    restoreFile(root, target.testPath, target.originalTestContent);
-    Object.assign(target, { status: 'rejected', outcome: 'suspected defect', defectFailures: gate.failures.slice(0, 5) });
-    saveRun(root, state);
+  if (gate.class === 'infra') {
+    reject(root, state, target, `not verified: infrastructure error at ${gate.gate} (${gate.message})`);
     return { outcome: 'rejected', gate };
   }
+  target.failedHashes.push(hash);
+
+  const claims = gate.class === 'assertion' ? matchedDefectClaims(target.result?.suspectedDefects ?? [], gate.failures) : [];
+  if (claims.length) {
+    target.defectClaims = claims;
+    target.defectFailures = gate.failures.filter((f) => f.class === 'assertion').slice(0, 5);
+    reject(root, state, target, 'suspected defect');
+    return { outcome: 'rejected', gate };
+  }
+
+  const signature = failureSignature(gate);
+  if (target.lastFailureSignature === signature) {
+    reject(root, state, target, `rejected: no progress, attempt ${target.attempts} failed exactly like the previous one at ${gate.gate} (${gate.class})`);
+    return { outcome: 'rejected', gate };
+  }
+  target.lastFailureSignature = signature;
+
   if (target.repairs < config.budgets.maxRepairs) {
     target.repairs += 1;
-    target.feedback = { gate: gate.gate, class: gate.class, message: gate.message, failures: gate.failures.slice(0, 5) };
+    const unmatched = (target.result?.suspectedDefects?.length ?? 0) > 0 && gate.class === 'assertion';
+    target.feedback = {
+      gate: gate.gate, class: gate.class, failures: gate.failures.slice(0, 5),
+      message: unmatched ? `${gate.message}. The suspected defects you reported do not name a failing test, so they were not accepted.` : gate.message,
+    };
     await issue(root, state, target, config);
     return { outcome: 'repair', gate };
   }
-  restoreFile(root, target.testPath, target.originalTestContent);
-  Object.assign(target, { status: 'rejected', outcome: `rejected at ${gate.gate} (${gate.class}) after ${target.repairs} repair(s)` });
-  saveRun(root, state);
+  reject(root, state, target, `rejected at ${gate.gate} (${gate.class}) after ${target.repairs} repair(s)`);
   return { outcome: 'rejected', gate };
 }
 
@@ -205,6 +270,9 @@ async function finalize(root, state, config) {
   state.final = {};
   for (const side of sides) {
     const suite = await runVitest({ root, side, outDir: join(runDir(root, state.runId), 'final', side), config });
+    const accepted = state.targets.filter((t) => t.status === 'accepted').map((t) => t.testPath);
+    const first = state.targets.find((t) => t.snapshot);
+    const effects = first ? await revertSideEffects(root, first.snapshot, accepted) : { changed: [] };
     const tsc = await runTsc({ root, side, config });
     const known = new Set(state.baseline[side].tscErrors);
     state.final[side] = {
@@ -212,7 +280,9 @@ async function finalize(root, state, config) {
       tests: suite.numTests,
       failures: suite.failures.slice(0, 10),
       newTypeErrors: tsc.errors.filter((e) => !known.has(tscKey(e))).length,
+      sideEffects: effects.changed,
     };
+    if (effects.changed.length) state.final[side].status = 'side-effect';
   }
   state.stage = 'done';
   saveRun(root, state);

@@ -1,3 +1,5 @@
+import { spawnSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { runCommand, safeEnv } from './lib/exec.mjs';
@@ -18,8 +20,10 @@ export async function runNode({ root, side, args, config, timeoutMs }) {
   const timeout = timeoutMs ?? config.budgets.commandTimeoutMs;
   if (config.sandbox === 'docker') {
     const user = typeof process.getuid === 'function' ? ['--user', `${process.getuid()}:${process.getgid()}`] : [];
+    // Killing the docker client does not stop the container; name it so a timeout can.
+    const name = `uta-${process.pid}-${randomBytes(4).toString('hex')}`;
     const dockerArgs = [
-      'run', '--rm', '--network', 'none',
+      'run', '--rm', '--name', name, '--network', 'none',
       '--memory', '2g', '--cpus', '2', '--pids-limit', '512',
       ...user,
       '-e', 'CI=true', '-e', 'TZ=UTC', '-e', 'NO_COLOR=1', '-e', 'HOME=/tmp',
@@ -27,7 +31,11 @@ export async function runNode({ root, side, args, config, timeoutMs }) {
       config.sandboxImage, 'node', ...args,
     ];
     // The docker client itself needs no secrets either.
-    return runCommand('docker', dockerArgs, { env: safeEnv(), timeoutMs: timeout + 30_000 });
+    return runCommand('docker', dockerArgs, {
+      env: safeEnv(),
+      timeoutMs: timeout + 30_000,
+      onTimeout: () => spawnSync('docker', ['kill', name], { stdio: 'ignore', timeout: 20_000 }),
+    });
   }
   return runCommand(process.execPath, args, { cwd: join(root, side), env: safeEnv(), timeoutMs: timeout });
 }

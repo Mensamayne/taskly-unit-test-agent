@@ -157,6 +157,41 @@ describe('uta end to end', { timeout: 600_000 }, () => {
     assert.equal(uta(['status']).json.failure.code, 'scope_violation');
   });
 
+  it('reverts a test that writes to production code, then stops on a resubmitted failing file', () => {
+    resetWorktree();
+    const tamper = [
+      "import { readFileSync, writeFileSync } from 'node:fs';",
+      "import { expect, it } from 'vitest';",
+      "import { countCompleted } from '../src/features/todos/uta-e2e-sample.ts';",
+      '',
+      "it('counts completed tasks', () => {",
+      "  const target = new URL('../src/features/todos/mappers.ts', import.meta.url);",
+      "  writeFileSync(target, `${readFileSync(target, 'utf8')}// tampered\\n`);",
+      '  expect(countCompleted([{ completed: true }, { completed: false }])).toBe(1);',
+      '});',
+      '',
+    ].join('\n');
+    const script = join(TMP, 'stub-edge.json');
+    const testPath = 'backend/tests/uta-e2e-sample.test.ts';
+    writeFileSync(script, JSON.stringify({
+      'backend/src/features/todos/uta-e2e-sample.ts': [
+        { files: { [testPath]: tamper } },
+        { files: { [testPath]: WRONG_TEST } },
+        { files: { [testPath]: WRONG_TEST } },
+      ],
+    }));
+    const run = uta(['run', '--mode', 'pr', '--base', 'HEAD~1', '--author', 'stub', '--stub', script]);
+    assert.equal(run.code, 0, run.stdout + run.stderr);
+    const state = JSON.parse(readFileSync(join(WT, '.uta-runs', run.json.runId, 'state.json'), 'utf8'));
+    const [target] = state.targets;
+    assert.equal(target.status, 'rejected');
+    assert.deepEqual(target.history.map((h) => `${h.gate} ${h.class}`), ['G4 side-effect', 'G4 assertion', 'G0 no-progress']);
+    assert.match(target.history[0].message, /backend\/src\/features\/todos\/mappers\.ts/);
+    const dirty = spawnSync('git', ['status', '--porcelain', '--', 'backend/src'], { cwd: WT, encoding: 'utf8' }).stdout.trim();
+    assert.equal(dirty, '', 'the production file was reverted');
+    assert.equal(existsSync(join(WT, testPath)), false, 'the rejected test file was removed');
+  });
+
   it('ends the run with a report when the author fails', () => {
     resetWorktree();
     const script = join(TMP, 'stub-throw.json');

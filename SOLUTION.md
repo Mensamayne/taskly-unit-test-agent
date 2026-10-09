@@ -45,8 +45,9 @@ Rationale: the brief weighs security, reliability, and correct results. A pipeli
 
 | Gate | Check |
 |------|-------|
+| G0 progress | A file identical to one that already failed is rejected without running |
 | G1 scope | Only the target's test file changed anywhere in the worktree. Any other change fails the whole run. |
-| G2 static | No `.only/.skip/.todo`, `@ts-ignore`, `as any`; every test asserts; no existing test removed; imports resolve without new dependencies |
+| G2 static | No `.only/.skip/.todo`, `@ts-ignore`, `as any`, unstubbed randomness; every test asserts; no existing test removed; imports resolve without new dependencies |
 | G3 typecheck | No new `tsc` errors (frontend tests are part of `npm run build`) |
 | G4 pass | The test file passes |
 | G6 value | The test file alone covers at least one target line |
@@ -154,6 +155,43 @@ Kept on purpose, because they show the gates working:
 
 The repository has no model key yet, so the runs above used the `external` driver, with Claude Code driving the CLI as the author. It received the same task packets, loaded the same skill files, used the same tools, and passed the same gates as the `sdk` driver. The `sdk` driver itself (`agent/src/author/sdk.mjs`) is written against the Agent SDK 0.3.282 type definitions but has not yet run against the API in this repository.
 
+## Edge cases
+
+After the example runs, the harness was attacked from the author's side on a scratch branch: written tests were made to fail, hang, cheat, and break the environment. Each case below was run for real through the CLI; the cases marked "fixed" were handled wrongly before this review.
+
+| Case | Behavior | Status |
+|------|----------|--------|
+| Syntax error in the test | G3 reports the `tsc` error with file and line; repair | as designed |
+| Test imports a module that does not exist | G2 rejects before running anything | as designed |
+| Author writes no file, or a file without tests | G1 / G2, repair | as designed |
+| Invalid self-report, or `gate` before `submit` | Typed CLI error, state unchanged | as designed |
+| Author exhausts `run_tests` | Budget error from the tool; host gates still run | as designed |
+| Test calls `process.exit` | Vitest intercepts it; runtime failure with the message | as designed |
+| Test writes to a production file while running | Was **accepted**. Now every test run is followed by a worktree check; the file is reverted and the target fails with `side-effect` | fixed |
+| Flaky test (`Math.random`) resubmitted until it passes | Was **accepted** on the third try. Now G2 rejects unstubbed randomness, and a resubmitted file that already failed is rejected without running (G0) | fixed |
+| Repair that fails exactly like the previous attempt | Used to spend the next repair. Now stops the target early (no progress) | fixed |
+| Test hangs on a promise | Reported as "STACK_TRACE_ERROR", class runtime. Now class `timeout` with an actionable message | fixed |
+| Synchronous infinite loop | Command timeout; the whole process tree is killed (process group on Linux, `taskkill /T` on Windows) and a container is stopped by name | fixed (Docker path not exercised locally) |
+| Vitest or `tsc` cannot run at all | Was charged to the author as a test failure. Now class `infra`: retried once, then "not verified", never a repair | fixed |
+| Author claims a defect for a failure it caused | Claims must name a test that failed on an assertion; the report labels them as unverified | partly fixed (a correctly named but wrong claim still reaches the report, labeled) |
+| Two sources with the same file name (flat backend tests) | Second one is a `noop` instead of two authors overwriting one file | fixed |
+| Path with `..` in a patch header (`backend/tests/../src/x.test.ts`) | Passed the raw allowlist check used by the publisher. Now rejected | fixed |
+| PR breaks existing tests | Baseline keeps coverage (`reportOnFailure`); target becomes `repair-existing` | fixed earlier |
+| Aborted or failed run | Report said "no source changes". Now "Could not verify the result: the run failed (code)" | fixed |
+| Author cannot see what changed | The packet now includes the unified diff of the file, not only line numbers | fixed |
+
+How the reviewed projects handle the same problems, read from their code:
+
+| Problem | CoverUp | ai-git-bot | unit-test-agent-4j | This harness |
+|---------|---------|------------|--------------------|--------------|
+| Hanging test | 60 s timeout, then gives up the segment | Tool timeout | Timeout failure type | Command timeout, tree kill, typed `timeout` |
+| Flaky test | `--repeat-tests` | One whole-suite retry (can hide flakiness) | Not handled | Shuffled repeats, randomness check, no resubmission |
+| State pollution | `--isolate-tests`, can disable polluters | Not handled | Not handled | Full suite gate, file-level isolation, side-effect revert |
+| Infra vs test failure | Separate timeout path | `ERROR` vs `FAILED` outcome | Failure taxonomy | `infra` class, retried, never charged to the author |
+| Endless repair | `--max-attempts` | Retry budget | Per-test cap, stagnation detection | Max 2 repairs, no-progress stop |
+| Path traversal | n/a | Guard does not normalize `..` | Project-root sandbox | Normalized hook, segment check on raw patch paths |
+| Missing dependency | Optionally `pip install`s it | n/a | Dependency failure type | Rejected at G2, never installed |
+
 ## Assumptions
 
 - Pull request authors are repository collaborators. Fork PRs are skipped because they get no secrets.
@@ -167,7 +205,10 @@ The repository has no model key yet, so the runs above used the `external` drive
 - The `sdk` driver and the Docker sandbox have not been exercised end to end here (no model key). The harness tests cover the pipeline with the `stub` and `external` drivers on real Vitest and `tsc`.
 - Commits pushed with `GITHUB_TOKEN` do not trigger other workflows, so CI does not rerun on the agent's commit. The publisher sets a commit status from the verified run instead.
 - Coverage is a proxy for value. A changed line that existing tests execute is a `noop` even if no test asserts the new behavior (in PR #3 the cache invalidation added to the mutation hooks is executed but not asserted).
-- Static checks are regular expressions: fast and conservative, not a parser.
+- Static checks are regular expressions: fast and conservative, not a parser. Randomness is detected for `Math.random` and `randomUUID` only.
+- Value is measured on lines, not branches: a test that covers a new branch on an already covered line does not count (CoverUp measures both).
+- The side-effect check sees files git tracks or would track. Writes to ignored paths (for example `coverage/`) or outside the repository are not detected; in CI the sandbox has no network, and the patch only ever carries test files.
+- A defect claim that names the right failing test but is wrong reaches the report; it is labeled as unverified.
 - Per target, results are all or nothing. A test file with one wrong test and five good ones is rejected after two repairs.
 - The PR comment shows the latest run only; earlier findings remain in the commit history and workflow artifacts.
 - For same-repository PRs, the workflow file itself comes from the PR branch, as with any GitHub workflow. Collaborators with write access are trusted with workflows anyway.

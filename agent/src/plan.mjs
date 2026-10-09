@@ -39,8 +39,20 @@ export function testPathFor(path) {
 
 function finalize(candidates, noops, maxTargets) {
   candidates.sort((a, b) => b.priority - a.priority || a.path.localeCompare(b.path));
-  const targets = candidates.slice(0, maxTargets).map((t, i) => ({ id: `t${i + 1}`, ...t }));
-  for (const t of candidates.slice(maxTargets)) noops.push({ path: t.path, reason: `over the target limit (${maxTargets})` });
+  // Backend tests are flat, so two sources with the same file name map to one test path.
+  // Only the first keeps it; two authors writing the same file would overwrite each other.
+  const owner = new Map();
+  const unique = [];
+  for (const c of candidates) {
+    if (owner.has(c.testPath)) {
+      noops.push({ path: c.path, reason: `its test path ${c.testPath} is already used by ${owner.get(c.testPath)} in this run` });
+      continue;
+    }
+    owner.set(c.testPath, c.path);
+    unique.push(c);
+  }
+  const targets = unique.slice(0, maxTargets).map((t, i) => ({ id: `t${i + 1}`, ...t }));
+  for (const t of unique.slice(maxTargets)) noops.push({ path: t.path, reason: `over the target limit (${maxTargets})` });
   return { targets, noops };
 }
 

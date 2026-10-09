@@ -26,9 +26,21 @@ export function trimFailure(message) {
   return text.length > 1500 ? `${text.slice(0, 1500)}\n[truncated]` : text;
 }
 
+/**
+ * Vitest's JSON reporter replaces the message of a timed-out test with STACK_TRACE_ERROR.
+ * Restore a message the author can act on.
+ * @param {string} message
+ * @param {number} [durationMs]
+ */
+export function explainFailure(message, durationMs) {
+  if (!/^Error: STACK_TRACE_ERROR/.test(message)) return message;
+  const after = durationMs ? ` after ${Math.round(durationMs)} ms` : '';
+  return `Test timed out${after}: an awaited promise never settled, fake timers were not advanced, or the test is too slow.`;
+}
+
 /** @param {string} message */
 export function classifyFailure(message) {
-  if (/Test timed out|timed out in \d+ms/i.test(message)) return 'timeout';
+  if (/Test timed out|timed out in \d+ms|STACK_TRACE_ERROR/i.test(message)) return 'timeout';
   if (/AssertionError|expected .+ to |toHaveBeenCalled|toEqual|toBe\(/i.test(message)) return 'assertion';
   return 'runtime';
 }
@@ -78,7 +90,7 @@ export async function runVitest({ root, side, files = [], outDir, coverageInclud
     }
     for (const a of suite.assertionResults ?? []) {
       if (a.status !== 'failed') continue;
-      const message = trimFailure((a.failureMessages ?? []).join('\n'));
+      const message = explainFailure(trimFailure((a.failureMessages ?? []).join('\n')), a.duration);
       failures.push({ file, title: a.fullName, message, class: classifyFailure(message) });
     }
   }

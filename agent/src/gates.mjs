@@ -5,14 +5,18 @@ import { isWritablePath } from './guard.mjs';
 import { packagePath, runTsc, runVitest, tscKey } from './runner.mjs';
 import { runNode } from './sandbox.mjs';
 import { targetDir } from './state.mjs';
-import { blocksWithoutExpect, extractTitles, findDisallowedMarkers, removedAssertionLines, unresolvedImports } from './testfile.mjs';
-import { changedSince, readOptional } from './workspace.mjs';
+import { blocksWithoutExpect, extractTitles, findDisallowedMarkers, removedAssertionLines, unresolvedImports, unstubbedRandomness } from './testfile.mjs';
+import { changedSince, readOptional, revertSideEffects } from './workspace.mjs';
 
 const PRETTIER = 'node_modules/prettier/bin/prettier.cjs';
 
 /**
  * Acceptance gates G1-G7. The host runs them for every driver; nothing the author
  * claims is trusted. The first failing gate stops evaluation.
+ *
+ * Failure classes: scope, static, typecheck, runtime, assertion, timeout, no-gain, flaky,
+ * pollution, side-effect (the author can fix these) and infra (the environment failed; not
+ * charged to the author).
  *
  * Returns { passed, gate, class, message, failures, fatal, coverage, reviewNotes, checks }.
  */
@@ -22,6 +26,24 @@ export async function runGates({ root, state, target, config }) {
   const fail = (gate, cls, message, extra = {}) => ({ passed: false, gate, class: cls, message, failures: [], fatal: false, checks, ...extra });
   const workDir = join(targetDir(root, state.runId, target.id), `attempt-${target.attempts}`, 'gates');
   const baseline = state.baseline[target.side];
+  const timeoutMs = config.budgets.commandTimeoutMs;
+
+  // Running tests must not change anything but the test file. Revert what a run changed and
+  // fail the gate; a change that cannot be reverted (the file was already dirty) fails the run.
+  const checkSideEffects = async (gate) => {
+    const effects = await revertSideEffects(root, target.snapshot, [target.testPath]);
+    if (!effects.changed.length) return null;
+    record(gate, false, effects);
+    const reverted = effects.restored.length ? ` Reverted: ${effects.restored.join(', ')}.` : '';
+    return fail(gate, 'side-effect', `running the tests changed files outside the test file: ${effects.changed.join(', ')}.${reverted} Tests must not write to the repository.`, {
+      fatal: effects.unrestorable.length > 0,
+    });
+  };
+  const runFailure = (gate, run, defaultClass) => {
+    if (run.status === 'timeout') return fail(gate, 'timeout', `the test run exceeded ${timeoutMs} ms and was stopped (an infinite loop or a hang outside a test)`);
+    if (run.status === 'error') return fail(gate, 'infra', `vitest did not produce results: ${run.stderrTail.trim().split(/\r?\n/).slice(-3).join(' ')}`);
+    return fail(gate, run.failures[0]?.class ?? defaultClass, `${run.failures.length} failing test(s)`, { failures: run.failures });
+  };
 
   // G1 scope: compare the whole worktree to the snapshot taken when the target was handed out.
   const changed = await changedSince(root, target.snapshot);
@@ -62,6 +84,8 @@ export async function runGates({ root, state, target, config }) {
   const unresolved = unresolvedImports(root, target.testPath, content);
   if (unresolved.length) problems.push(`imports that do not resolve (new dependencies are not allowed): ${unresolved.join(', ')}`);
   if (!extractTitles(content).length) problems.push('no tests found');
+  const random = unstubbedRandomness(content);
+  if (random.length) problems.push(`nondeterministic values without a stub: ${random.join(', ')} (stub them with vi.spyOn or use fixed values)`);
   if (problems.length) {
     record('G2', false, problems);
     return fail('G2', 'static', problems.join('; '));
@@ -71,7 +95,7 @@ export async function runGates({ root, state, target, config }) {
 
   // G3 typecheck: no new errors compared with the baseline.
   const tsc = await runTsc({ root, side: target.side, config });
-  if (tsc.failedToRun) return fail('G3', 'typecheck', `tsc did not run: ${tsc.stderrTail}`);
+  if (tsc.failedToRun) return fail('G3', 'infra', `tsc did not run: ${tsc.stderrTail}`);
   const known = new Set(baseline.tscErrors);
   const fresh = tsc.errors.filter((e) => !known.has(tscKey(e)));
   if (fresh.length) {
@@ -87,12 +111,11 @@ export async function runGates({ root, state, target, config }) {
     root, side: target.side, files: [target.testPath], outDir: join(workDir, 'g4'),
     coverageInclude: target.path, config,
   });
+  const afterG4 = await checkSideEffects('G4');
+  if (afterG4) return afterG4;
   if (first.status !== 'pass') {
     record('G4', false, first.status);
-    const cls = first.status === 'timeout' ? 'timeout' : first.failures[0]?.class ?? 'runtime';
-    return fail('G4', cls, first.status === 'error' ? `vitest did not produce results: ${first.stderrTail}` : `${first.failures.length} failing test(s)`, {
-      failures: first.failures,
-    });
+    return runFailure('G4', first, 'runtime');
   }
   record('G4', true, `${first.numTests} tests`);
 
@@ -115,6 +138,9 @@ export async function runGates({ root, state, target, config }) {
   // G5 stability: repeated runs in shuffled order.
   for (let i = 2; i <= config.budgets.stabilityRuns; i++) {
     const again = await runVitest({ root, side: target.side, files: [target.testPath], outDir: join(workDir, `g5-${i}`), shuffle: true, config });
+    const afterG5 = await checkSideEffects('G5');
+    if (afterG5) return afterG5;
+    if (again.status === 'error') return runFailure('G5', again, 'flaky');
     if (again.status !== 'pass') {
       record('G5', false, `run ${i}: ${again.status}`);
       return fail('G5', 'flaky', `passed once but failed on repeat run ${i} (shuffled order)`, { failures: again.failures, coverage });
@@ -125,13 +151,13 @@ export async function runGates({ root, state, target, config }) {
   // G7 full package suite: no new failures compared with the baseline.
   const suite = await runVitest({ root, side: target.side, outDir: join(workDir, 'g7'), config });
   const knownFailing = new Set(baseline.failingTests);
+  const afterG7 = await checkSideEffects('G7');
+  if (afterG7) return afterG7;
+  if (suite.status === 'error' || suite.status === 'timeout') return runFailure('G7', suite, 'pollution');
   const newFailures = suite.failures.filter((f) => !knownFailing.has(`${f.file}|${f.title}`));
-  if (suite.status === 'error' || suite.status === 'timeout' || newFailures.length) {
+  if (newFailures.length) {
     record('G7', false, newFailures);
-    return fail('G7', 'pollution', suite.status === 'pass' || suite.status === 'fail' ? `${newFailures.length} other test(s) fail with the new file in the suite` : `suite run ${suite.status}`, {
-      failures: newFailures,
-      coverage,
-    });
+    return fail('G7', 'pollution', `${newFailures.length} test(s) fail when the new file runs with the full suite`, { failures: newFailures, coverage });
   }
   record('G7', true, `${suite.numTests} tests in suite`);
 

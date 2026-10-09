@@ -4,6 +4,7 @@ import { HarnessError } from './lib/errors.mjs';
 import { buildChangeContext } from './packet.mjs';
 import { runVitest } from './runner.mjs';
 import { expectStatus, getTarget, saveRun, targetDir } from './state.mjs';
+import { revertSideEffects } from './workspace.mjs';
 
 /**
  * Author tools. One implementation, exposed to the SDK agent through MCP and to
@@ -25,15 +26,22 @@ export async function toolRunTests({ root, state, targetId, config }) {
   saveRun(root, state);
   const outDir = join(targetDir(root, state.runId, target.id), `attempt-${target.attempts}`, `tool-run-${target.toolRuns}`);
   const run = await runVitest({ root, side: target.side, files: [target.testPath], outDir, coverageInclude: target.path, config });
+  // A test that writes outside its own file is reverted right away and the author is told,
+  // so the side effect is fixed in the test instead of failing the whole run later at G1.
+  const effects = await revertSideEffects(root, target.snapshot, [target.testPath]);
   target.lastToolCoverage = run.coverageFile;
   saveRun(root, state);
   return {
-    status: run.status,
+    status: effects.changed.length ? 'side-effect' : run.status,
     numTests: run.numTests,
     failures: run.failures.slice(0, 10),
     durationMs: run.durationMs,
     runsLeft: config.budgets.maxToolRuns - target.toolRuns,
+    ...(effects.changed.length
+      ? { sideEffects: `the test changed files outside the test file and they were reverted: ${effects.changed.join(', ')}. Tests must not write to the repository.` }
+      : {}),
     ...(run.status === 'error' ? { output: run.stderrTail } : {}),
+    ...(run.status === 'timeout' ? { output: `stopped after ${config.budgets.commandTimeoutMs} ms (an infinite loop or a hang outside a test)` } : {}),
   };
 }
 

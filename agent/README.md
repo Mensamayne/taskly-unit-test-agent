@@ -48,15 +48,18 @@ Run state lives in `.uta-runs/<run id>/` (gitignored): `state.json`, per-target 
 
 | Gate | Check |
 |------|-------|
+| G0 progress | A file identical to one that already failed is rejected without running anything |
 | G1 scope | Only the target's test file changed anywhere in the worktree since the target was handed out. Any other change fails the whole run. |
-| G2 static | No `.only/.skip/.todo`, `@ts-ignore`, `as any`; every test asserts; no existing test removed; imports resolve without new dependencies |
+| G2 static | No `.only/.skip/.todo`, `@ts-ignore`, `as any`, unstubbed `Math.random`/`randomUUID`; every test asserts; no existing test removed; imports resolve without new dependencies |
 | G3 typecheck | `tsc --noEmit` adds no new errors |
 | G4 pass | The test file passes |
 | G6 value | It covers at least one of the target lines (not applied to `repair-existing`) |
 | G5 stable | Passes repeatedly in shuffled order |
 | G7 suite | The full package suite has no new failures |
 
-A failing assertion that the author explains as a defect in the source is not repaired: the test is dropped and reported as a suspected defect.
+After every test run (G4, G5, G7, the author's own `run_tests`, and the final verification) the worktree is checked again: a test that writes outside its own file is reverted and fails with class `side-effect`.
+
+A failing assertion that the author explains as a defect in the source is not repaired: if the claim names a test that failed on an assertion, the test is dropped and reported as a suspected defect (marked as unverified). A repair that fails exactly like the previous attempt stops the target early. An environment failure (no Vitest report, `tsc` not running) is class `infra`: retried once, never charged to the author, and reported as "not verified" if it persists.
 
 ## Safety
 
