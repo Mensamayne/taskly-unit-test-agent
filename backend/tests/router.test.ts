@@ -101,8 +101,7 @@ it('shortens a long title so the duplicate still fits 120 characters', async () 
   repository.get.mockResolvedValueOnce({ ...todo, title: 'x'.repeat(120) });
   expect((await request(app).post('/api/todos/1/duplicate')).status).toBe(201);
   const input = repository.create.mock.calls[0][0];
-  expect(input.title.length).toBeLessThanOrEqual(120);
-  expect(input.title.endsWith(' (copy)')).toBe(true);
+  expect(input.title).toBe(`${'x'.repeat(113)} (copy)`);
 });
 it('returns 404 when duplicating a missing task without creating anything', async () => {
   const { app, repository } = setup();
@@ -119,7 +118,7 @@ it('rejects duplicating with an invalid task ID with 422', async () => {
   expect(repository.create).not.toHaveBeenCalled();
 });
 
-it('removes only completed tasks, oldest first, and reports how many were removed', async () => {
+it('removes only completed tasks, lowest ID first, and reports how many were removed', async () => {
   const { app, repository } = setup();
   repository.list.mockResolvedValue([
     { ...todo, id: 5, completed: true },
@@ -142,7 +141,7 @@ it('does not count completed tasks that were already gone when deleting', async 
   const response = await request(app).delete('/api/todos/completed');
   expect(response.status).toBe(200);
   expect(response.body).toEqual({ removed: 1 });
-  expect(repository.delete).toHaveBeenCalledTimes(2);
+  expect(repository.delete.mock.calls).toEqual([[1], [2]]);
 });
 it('removes nothing when no task is completed', async () => {
   const { app, repository } = setup();
