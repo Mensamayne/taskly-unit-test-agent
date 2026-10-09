@@ -1,0 +1,70 @@
+name: Verify push token (temporary)
+
+# Temporary check, removed after use. Runs the push-token probe from unit-test-agent.yml verbatim
+# with the configured secret and with a token known to have write access. No model is involved.
+
+on:
+  pull_request:
+    paths: ['.github/workflows/verify-push-token.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Probe (secret)
+        id: secret
+        env:
+          PUSH_TOKEN: ${{ secrets.UNIT_TEST_AGENT_PUSH_TOKEN }}
+        run: |
+          if [ -z "$PUSH_TOKEN" ]; then
+            echo "UNIT_TEST_AGENT_PUSH_TOKEN is not set; pushing with GITHUB_TOKEN (CI will not run on the agent's commit)." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          probe="$(mktemp -d)"
+          git -C "$probe" init -q
+          git -C "$probe" -c user.name=probe -c user.email=probe@example.invalid commit -q --allow-empty -m probe
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$PUSH_TOKEN" | base64 -w0)"
+          if git -C "$probe" -c http.extraheader="$auth" push --dry-run --quiet \
+              "https://github.com/$GITHUB_REPOSITORY.git" "HEAD:refs/heads/unit-test-agent-push-probe" 2>/dev/null; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::UNIT_TEST_AGENT_PUSH_TOKEN cannot push to this repository (it needs Contents: read and write). Pushing with GITHUB_TOKEN; CI on the agent's commit will need approval."
+            echo "UNIT_TEST_AGENT_PUSH_TOKEN cannot push to this repository; pushed with GITHUB_TOKEN instead." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          rm -rf "$probe"
+      - name: Probe (known_good)
+        id: known_good
+        env:
+          PUSH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -z "$PUSH_TOKEN" ]; then
+            echo "UNIT_TEST_AGENT_PUSH_TOKEN is not set; pushing with GITHUB_TOKEN (CI will not run on the agent's commit)." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          probe="$(mktemp -d)"
+          git -C "$probe" init -q
+          git -C "$probe" -c user.name=probe -c user.email=probe@example.invalid commit -q --allow-empty -m probe
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$PUSH_TOKEN" | base64 -w0)"
+          if git -C "$probe" -c http.extraheader="$auth" push --dry-run --quiet \
+              "https://github.com/$GITHUB_REPOSITORY.git" "HEAD:refs/heads/unit-test-agent-push-probe" 2>/dev/null; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::UNIT_TEST_AGENT_PUSH_TOKEN cannot push to this repository (it needs Contents: read and write). Pushing with GITHUB_TOKEN; CI on the agent's commit will need approval."
+            echo "UNIT_TEST_AGENT_PUSH_TOKEN cannot push to this repository; pushed with GITHUB_TOKEN instead." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          rm -rf "$probe"
+      - name: Report
+        env:
+          SECRET_OK: ${{ steps.secret.outputs.ok }}
+          KNOWN_GOOD_OK: ${{ steps.known_good.outputs.ok }}
+        run: |
+          echo "configured secret can push: ${SECRET_OK:-false}"
+          echo "known good token can push: ${KNOWN_GOOD_OK:-false}"
+          [ "$KNOWN_GOOD_OK" = "true" ] || { echo "::error::the probe rejected a token that can write"; exit 1; }
+          if [ "$SECRET_OK" != "true" ]; then
+            echo "::warning::UNIT_TEST_AGENT_PUSH_TOKEN cannot push: the publish job would fall back to GITHUB_TOKEN"
+          fi
