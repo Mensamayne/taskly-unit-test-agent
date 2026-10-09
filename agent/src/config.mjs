@@ -16,7 +16,9 @@ const BUDGETS = {
 };
 
 const SANDBOXES = ['local', 'docker'];
-const DEFAULT_IMAGE = 'node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392';
+// The Docker official image through the ECR Public mirror: anonymous Docker Hub pulls from shared
+// CI runners hit the rate limit. The digest pins the content, so the mirror cannot change it.
+const DEFAULT_IMAGE = 'public.ecr.aws/docker/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392';
 const DEFAULT_BOOTSTRAP_SKIP = ['backend/src/main.ts'];
 
 function clampNumber(raw, spec) {
