@@ -61,10 +61,18 @@ export function selectTodos(
     })
 }
 
-export function isOverdue(todo: Todo): boolean {
+function localToday(): string {
   const today = new Date()
-  const localDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
-  return !todo.completed && !!todo.due_date && todo.due_date < localDate
+  return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+}
+
+export function isOverdue(todo: Todo): boolean {
+  return !todo.completed && !!todo.due_date && todo.due_date < localToday()
+}
+
+/** True when an active task is due on the local calendar day. */
+export function isDueToday(todo: Todo): boolean {
+  return !todo.completed && !!todo.due_date && todo.due_date === localToday()
 }
 
 export function formatDate(date: string): string {
