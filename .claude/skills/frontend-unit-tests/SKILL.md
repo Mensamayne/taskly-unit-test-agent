@@ -11,7 +11,7 @@ Tests sit next to the unit (`TodoList.tsx` -> `TodoList.test.tsx`), run in jsdom
 
 - `*.test.tsx` for components and hooks that render, `*.test.ts` for plain modules.
 - Import Vitest helpers explicitly: `import { describe, expect, it, vi } from 'vitest'`.
-- Style (Prettier): no semicolons, single quotes, trailing commas, 2-space indent, 80 columns.
+- Style (Prettier): no semicolons, single quotes, trailing commas, 2-space indent, 80 columns. The host formats the test file with the project Prettier config before checks.
 - Setup: `src/test/setup.ts` adds jest-dom matchers and cleanup. Do not edit it.
 - Fixture: `src/test/todoFixture.ts` exports `todoFixture` (a full `Todo`). Spread and override it.
 - Run: `npm test` in `frontend/`. Type-check: `npm run typecheck`.

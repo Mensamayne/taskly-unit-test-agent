@@ -1,10 +1,14 @@
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadLineCoverage } from './coverage.mjs';
 import { isWritablePath } from './guard.mjs';
-import { runTsc, runVitest, tscKey } from './runner.mjs';
+import { packagePath, runTsc, runVitest, tscKey } from './runner.mjs';
+import { runNode } from './sandbox.mjs';
 import { targetDir } from './state.mjs';
 import { blocksWithoutExpect, extractTitles, findDisallowedMarkers, removedAssertionLines, unresolvedImports } from './testfile.mjs';
 import { changedSince, readOptional } from './workspace.mjs';
+
+const PRETTIER = 'node_modules/prettier/bin/prettier.cjs';
 
 /**
  * Acceptance gates G1-G7. The host runs them for every driver; nothing the author
@@ -27,12 +31,24 @@ export async function runGates({ root, state, target, config }) {
     return fail('G1', 'scope', `files outside the target were changed: ${outside.join(', ')}`, { fatal: true, outside });
   }
   if (!isWritablePath(target.testPath)) return fail('G1', 'scope', `test path is not writable: ${target.testPath}`, { fatal: true });
-  const content = readOptional(root, target.testPath);
-  if (content === null || !changed.includes(target.testPath)) {
+  if (readOptional(root, target.testPath) === null || !changed.includes(target.testPath)) {
     record('G1', false, 'test file not written');
     return fail('G1', 'static', `the test file ${target.testPath} was not written or not changed`);
   }
   record('G1', true, changed);
+
+  // Deterministic post-processing: format with the package's own Prettier setup, so style is
+  // never a reason for a repair round. A Prettier parse error means the file is not valid code.
+  const prettier = join(root, target.side, PRETTIER);
+  if (existsSync(prettier) && existsSync(join(root, target.side, '.prettierrc.json'))) {
+    const fmt = await runNode({ root, side: target.side, args: [PRETTIER, '--write', packagePath(target.side, target.testPath)], config });
+    if (fmt.exitCode !== 0) {
+      record('format', false, fmt.stderr.slice(-1000));
+      return fail('G2', 'static', `the file does not parse: ${fmt.stderr.trim().split('\n').slice(0, 5).join(' ')}`);
+    }
+    record('format', true);
+  }
+  const content = readOptional(root, target.testPath);
 
   // G2 static checks.
   const problems = [];
