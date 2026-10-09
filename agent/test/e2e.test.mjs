@@ -66,7 +66,7 @@ function uta(args, { env = {}, input } = {}) {
 
 function resetWorktree() {
   git(['reset', '--hard', 'HEAD']);
-  git(['clean', '-fdq', '--', 'backend', 'frontend']);
+  git(['clean', '-fdq', '-e', 'node_modules', '--', 'backend', 'frontend']);
   rmSync(join(WT, '.uta-runs'), { recursive: true, force: true });
 }
 
