@@ -98,6 +98,6 @@ it('summarizes the stored tasks against the current date', async () => {
   ]);
   const response = await request(app).get('/api/todos/stats');
   expect(response.status).toBe(200);
-  expect(response.body).toEqual({ total: 3, completed: 1, active: 2, overdue: 1 });
+  expect(response.body).toEqual({ total: 3, completed: 1, active: 2, overdue: 1, dueToday: 0 });
   expect(repository.get).not.toHaveBeenCalled();
 });
