@@ -18,8 +18,9 @@ const CLI = join(REPO, 'agent', 'src', 'cli.mjs');
 const SOURCE = 'backend/src/features/todos/uta-e2e-sample.ts';
 const TEST_PATH = 'backend/tests/uta-e2e-sample.test.ts';
 const dockerReady = process.platform === 'linux' && spawnSync('docker', ['version'], { stdio: 'ignore' }).status === 0;
-const TMP = mkdtempSync(join(tmpdir(), 'uta-docker-'));
-const WT = join(TMP, 'wt');
+// Created in before(), so a skipped run leaves nothing behind.
+let TMP;
+let WT;
 
 const SAMPLE = `import type { Todo } from './types.js';
 
@@ -69,6 +70,8 @@ function reset() {
 
 before(() => {
   if (!dockerReady) return;
+  TMP = mkdtempSync(join(tmpdir(), 'uta-docker-'));
+  WT = join(TMP, 'wt');
   assert.equal(spawnSync('docker', ['pull', '-q', loadConfig({}).sandboxImage], { stdio: 'ignore' }).status, 0, 'sandbox image pulls');
   git(['worktree', 'add', '--detach', WT, 'HEAD'], REPO);
   // Real copies: the container sees only the worktree, and Vite writes into node_modules.
