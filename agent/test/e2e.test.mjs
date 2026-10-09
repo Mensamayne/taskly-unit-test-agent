@@ -169,6 +169,25 @@ describe('uta end to end', { timeout: 600_000 }, () => {
     assert.match(readFileSync(run.json.artifacts.report, 'utf8'), /Run failed: author_error/);
   });
 
+  it('plans a repair when the pull request breaks existing tests', () => {
+    resetWorktree();
+    const validators = join(WT, 'backend', 'src', 'features', 'todos', 'validators.ts');
+    writeFileSync(validators, readFileSync(validators, 'utf8').replace('.min(1).max(120)', '.min(1).max(100)'));
+    git(['commit', '-qam', 'change title limit']);
+    try {
+      const run = uta(['run', '--mode', 'pr', '--base', 'HEAD~2', '--author', 'external']);
+      assert.equal(run.code, 3, run.stdout + run.stderr);
+      const targets = Object.fromEntries(run.json.targets.map((t) => [t.path, t.action]));
+      assert.equal(targets['backend/src/features/todos/validators.ts'], 'repair-existing');
+      assert.equal(run.json.awaiting.testPath, 'backend/tests/validators.test.ts', 'repairs are handled first');
+      const state = JSON.parse(readFileSync(join(WT, '.uta-runs', run.json.runId, 'state.json'), 'utf8'));
+      assert.ok(state.baseline.backend.failingTests.some((t) => t.startsWith('backend/tests/validators.test.ts|')));
+      assert.equal(uta(['abort']).code, 0);
+    } finally {
+      git(['reset', '-q', '--hard', 'HEAD~1']);
+    }
+  });
+
   it('refuses the external driver in CI', () => {
     resetWorktree();
     const out = spawnSync(process.execPath, [CLI, 'run', '--mode', 'pr', '--base', 'HEAD~1', '--author', 'external', '--root', WT], {

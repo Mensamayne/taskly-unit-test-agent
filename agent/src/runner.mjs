@@ -50,7 +50,8 @@ export async function runVitest({ root, side, files = [], outDir, coverageInclud
   if (coverageInclude !== null) {
     // Project coverage thresholds may fail the exit code of a scoped run; the JSON report,
     // not the exit code, decides pass/fail below.
-    args.push('--coverage.enabled', '--coverage.reporter=json', `--coverage.reportsDirectory=${fromPackage(root, side, covDir)}`);
+    // reportOnFailure: a baseline with failing tests (a PR that broke them) still needs coverage.
+    args.push('--coverage.enabled', '--coverage.reportOnFailure', '--coverage.reporter=json', `--coverage.reportsDirectory=${fromPackage(root, side, covDir)}`);
     if (coverageInclude !== 'all') args.push(`--coverage.include=${packagePath(side, coverageInclude)}`);
   }
   const proc = await runNode({ root, side, args, config });
