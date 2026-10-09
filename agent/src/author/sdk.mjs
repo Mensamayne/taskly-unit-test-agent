@@ -98,6 +98,11 @@ function modelEnv() {
   return env;
 }
 
+/** True for the SDK errors raised when a session reaches maxBudgetUsd or maxTurns. */
+export function isLimitError(err) {
+  return /maximum budget|max(?:imum)?[_ ]?(?:number of )?turns|error_max_(?:budget|turns)/i.test(String(err?.message ?? err));
+}
+
 function asText(payload, isError = false) {
   return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }], ...(isError ? { isError: true } : {}) };
 }
@@ -191,17 +196,30 @@ export function createSdkDriver({ configRoot }) {
       };
 
       let result = null;
-      for await (const msg of query({ prompt, options })) {
-        if (msg.session_id && !target.sessionId) target.sessionId = msg.session_id;
-        const line = summarizeMessage(msg);
-        if (line) appendFileSync(transcript, `${JSON.stringify({ type: msg.type, ...(Array.isArray(line) ? { blocks: line } : line) })}\n`);
-        if (msg.type === 'result') result = msg;
+      let limit = null;
+      try {
+        for await (const msg of query({ prompt, options })) {
+          if (msg.session_id && !target.sessionId) target.sessionId = msg.session_id;
+          const line = summarizeMessage(msg);
+          if (line) appendFileSync(transcript, `${JSON.stringify({ type: msg.type, ...(Array.isArray(line) ? { blocks: line } : line) })}\n`);
+          if (msg.type === 'result') result = msg;
+        }
+      } catch (err) {
+        // The SDK throws when a session hits its budget or turn limit. That ends this session,
+        // not the run: the gates judge what was written and the budgets decide what comes next.
+        if (!isLimitError(err)) throw err;
+        limit = err.message;
       }
 
-      const cost = result?.total_cost_usd ?? 0;
+      // Without a reported cost, assume the session spent its whole allowance.
+      const cost = result?.total_cost_usd ?? (limit ? options.maxBudgetUsd : 0);
       target.costUsd = (target.costUsd ?? 0) + cost;
       state.costUsd = (state.costUsd ?? 0) + cost;
-      target.sessions = [...(target.sessions ?? []), { attempt: target.attempts, subtype: result?.subtype ?? 'no-result', turns: result?.num_turns ?? 0, costUsd: cost }];
+      target.sessions = [...(target.sessions ?? []), {
+        attempt: target.attempts, subtype: result?.subtype ?? (limit ? 'limit' : 'no-result'), turns: result?.num_turns ?? 0, costUsd: cost,
+        ...(limit ? { limit } : {}),
+      }];
+      if (limit) appendFileSync(transcript, `${JSON.stringify({ type: 'limit', message: limit })}\n`);
       saveRun(root, state);
 
       if (result?.subtype === 'success' && result.structured_output) return result.structured_output;
@@ -230,8 +248,15 @@ export function createSdkDriver({ configRoot }) {
       };
       const prompt = `Review the unit tests in \`${target.testPath}\` for \`${target.path}\`. Return the findings object.`;
       let result = null;
-      for await (const msg of query({ prompt, options })) if (msg.type === 'result') result = msg;
-      const cost = result?.total_cost_usd ?? 0;
+      let limited = false;
+      try {
+        for await (const msg of query({ prompt, options })) if (msg.type === 'result') result = msg;
+      } catch (err) {
+        // The review is advisory: a limit or an error drops the notes, never the accepted test.
+        limited = isLimitError(err);
+        if (!limited) return null;
+      }
+      const cost = result?.total_cost_usd ?? (limited ? options.maxBudgetUsd : 0);
       state.costUsd = (state.costUsd ?? 0) + cost;
       saveRun(root, state);
       return result?.subtype === 'success' ? (result.structured_output?.findings ?? []) : null;

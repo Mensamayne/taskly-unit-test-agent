@@ -57,7 +57,7 @@ function finalize(candidates, noops, maxTargets) {
 }
 
 function actionFor(testPath, failingFiles, exists) {
-  if (failingFiles.has(testPath)) return { action: 'repair-existing', reason: 'existing tests for this file fail on the head commit' };
+  if (failingFiles.has(testPath)) return { action: 'repair-existing', reason: 'existing tests for this file fail or do not compile on the head commit' };
   if (exists(testPath)) return { action: 'update', reason: 'test file exists; add cases for the uncovered lines' };
   return { action: 'write', reason: 'no test file yet' };
 }
@@ -104,7 +104,7 @@ export function planPullRequest({ files, added, baseline, exists, maxTargets }) 
     const { action, reason } = actionFor(testPath, failingFiles, exists);
     const changed = (added.get(path) ?? []).filter((l) => cov.executable.has(l));
     if (action === 'repair-existing') {
-      candidates.push({ path, side, action, reason, testPath, changedLines: changed, linesToCover: [], priority: 1_000_000 });
+      candidates.push({ path, side, action, reason, testPath, changedLines: changed, linesToCover: changed.filter((l) => !cov.covered.has(l)), priority: 1_000_000 });
       continue;
     }
     if (!changed.length) {

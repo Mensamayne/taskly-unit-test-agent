@@ -95,6 +95,7 @@ These runs used the `external` driver with Claude Code as the author, because th
 - Commits pushed with `GITHUB_TOKEN` do not retrigger CI; the publisher sets a commit status from the verified run instead.
 - Coverage is a proxy: changed lines that existing tests execute are a `noop` even if the new behavior is not asserted. Gains are measured on lines, not branches.
 - Static checks are regular expressions; a correctly named but wrong defect claim reaches the report (labeled unverified).
+- USD limits are checked between model turns, so a session can exceed its allowance by one turn.
 - Results are all or nothing per target; the PR comment shows the latest run only; targets per run are capped (8).
 
 ## What I would change for production

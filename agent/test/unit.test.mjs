@@ -400,3 +400,40 @@ describe('edge cases', () => {
     assert.equal(checkWrite(ROOT, 'frontend/src/__tests__/../../../backend/src/x.test.ts').ok, false);
   });
 });
+
+describe('review findings', async () => {
+  const { groupFailures, siblingTest } = await import('../src/packet.mjs');
+  const { isLimitError } = await import('../src/author/sdk.mjs').catch(() => ({ isLimitError: null }));
+
+  it('groups failures that share a root cause', () => {
+    const groups = groupFailures([
+      { title: 'a', message: ['Error: No QueryClient set', ' at x'].join('\n') },
+      { title: 'b', message: ['Error: No QueryClient set', ' at y'].join('\n') },
+      { title: 'c', message: 'AssertionError: expected 1 to be 2' },
+    ]);
+    assert.equal(groups.length, 2);
+    assert.match(groups[0].label, /^2 tests \("a", "b"\)$/);
+    assert.equal(groups[1].label, 'c');
+  });
+
+  it('uses the existing test file, or a test from the same source directory, as the style reference', () => {
+    mkdirSync(join(ROOT, 'backend', 'src', 'features', 'todos'), { recursive: true });
+    for (const f of ['repository.ts', 'router.ts', 'newthing.ts']) writeFileSync(join(ROOT, 'backend', 'src', 'features', 'todos', f), '');
+    writeFileSync(join(ROOT, 'backend', 'tests', 'repository.test.ts'), '');
+    const existing = { side: 'backend', path: 'backend/src/features/todos/repository.ts', testPath: 'backend/tests/repository.test.ts' };
+    assert.equal(siblingTest(ROOT, existing), 'backend/tests/repository.test.ts');
+    const fresh = { side: 'backend', path: 'backend/src/features/todos/newthing.ts', testPath: 'backend/tests/newthing.test.ts' };
+    assert.equal(siblingTest(ROOT, fresh), 'backend/tests/repository.test.ts');
+  });
+
+  it('recognizes SDK budget and turn limits', { skip: !isLimitError && 'agent dependencies not installed' }, () => {
+    assert.equal(isLimitError(new Error('Claude Code returned an error result: Reached maximum budget ($1)')), true);
+    assert.equal(isLimitError(new Error('Reached maximum number of turns (30)')), true);
+    assert.equal(isLimitError(new Error('error_max_turns')), true);
+    assert.equal(isLimitError(new Error('Not logged in')), false);
+  });
+
+  it('flags a build that still does not typecheck', () => {
+    assert.equal(verificationLine({ stage: 'done', final: { backend: { status: 'pass', newTypeErrors: 0, typeErrors: 1 } } }), 'Tests passed, typecheck failed');
+  });
+});
