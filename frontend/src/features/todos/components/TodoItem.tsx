@@ -1,4 +1,5 @@
-import { CalendarDays, Pencil, Trash2 } from 'lucide-react'
+import { CalendarDays, Copy, Pencil, Trash2 } from 'lucide-react'
+import { useDuplicateTodoMutation } from '../hooks/useDuplicateTodoMutation'
 import type { Todo } from '../types'
 import { formatDate, isOverdue, priorityLabels } from '../utils/todos'
 import {
@@ -23,6 +24,7 @@ export function TodoItem({
   onEdit: () => void
   onDelete: () => void
 }) {
+  const duplicate = useDuplicateTodoMutation()
   return (
     <li>
       <Card>
@@ -70,6 +72,14 @@ export function TodoItem({
               aria-label={`Edit: ${todo.title}`}
             >
               <Pencil size={16} aria-hidden="true" />
+            </IconButton>
+            <IconButton
+              variant="ghost"
+              disabled={busy || duplicate.isPending}
+              onClick={() => duplicate.mutate(todo.id)}
+              aria-label={`Duplicate: ${todo.title}`}
+            >
+              <Copy size={16} aria-hidden="true" />
             </IconButton>
             <IconButton
               variant="ghost"

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import type { TodoStore } from './types.js';
 import { createSchema, updateSchema, idSchema } from './validators.js';
 import { computeStats } from './stats.js';
+import { duplicateInput } from './duplicate.js';
 
 export function createTodosRouter(repository: TodoStore) {
   const router = Router();
@@ -25,6 +26,11 @@ export function createTodosRouter(repository: TodoStore) {
     const todo = await repository.get(Number(res.locals.todoId));
     if (!todo) return res.status(404).json({ detail: 'Task not found.' });
     res.json(todo);
+  });
+  router.post('/:id/duplicate', async (req, res) => {
+    const todo = await repository.get(Number(res.locals.todoId));
+    if (!todo) return res.status(404).json({ detail: 'Task not found.' });
+    res.status(201).json(await repository.create(duplicateInput(todo)));
   });
   router.patch('/:id', async (req, res) => {
     const result = updateSchema.safeParse(req.body);
