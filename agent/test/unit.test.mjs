@@ -357,7 +357,14 @@ describe('report', () => {
 });
 
 describe('publish patch validation', async () => {
-  const { validatePatch } = await import('../src/publish.mjs');
+  const { noRunNotice, validatePatch } = await import('../src/publish.mjs');
+
+  it('explains a missing API key when the author job skipped', () => {
+    const body = noRunNotice('missing_api_key', 'https://example.test/run');
+    assert.match(body, /ANTHROPIC_API_KEY/);
+    assert.match(body, /uta run --author external/);
+    assert.match(noRunNotice(undefined, 'https://example.test/run'), /did not produce a result/);
+  });
   const newFile = (path) => [
     `diff --git a/${path} b/${path}`,
     'new file mode 100644',

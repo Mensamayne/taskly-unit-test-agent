@@ -90,15 +90,27 @@ function commitMessage(run, paths) {
 }
 
 /**
- * @param {{ runDir: string | null, mode: 'commit' | 'comment', repo: string, pr: string | null,
- *           workspace: string, runUrl: string, baseBranch: string }} opts
+ * Sticky comment when the author job produced no run directory.
+ * @param {string | undefined} skipReason
+ * @param {string} runUrl
  */
-export async function publish({ runDir, mode, repo, pr, workspace, runUrl, baseBranch, local = false }) {
+export function noRunNotice(skipReason, runUrl) {
+  if (skipReason === 'missing_api_key') {
+    return `${COMMENT_MARKER}\n### Unit test agent\n\nSkipped: the \`ANTHROPIC_API_KEY\` secret is not configured. The harness can still be run locally with \`uta run --author external\`. See the workflow run: ${runUrl}\n`;
+  }
+  return `${COMMENT_MARKER}\n### Unit test agent\n\nThe agent run did not produce a result. See the workflow run: ${runUrl}\n`;
+}
+
+/**
+ * @param {{ runDir: string | null, mode: 'commit' | 'comment', repo: string, pr: string | null,
+ *           workspace: string, runUrl: string, baseBranch: string, skipReason?: string }} opts
+ */
+export async function publish({ runDir, mode, repo, pr, workspace, runUrl, baseBranch, local = false, skipReason }) {
   identity = local ? null : BOT;
   if (!runDir || !existsSync(join(runDir, 'run.json'))) {
-    const body = `${COMMENT_MARKER}\n### Unit test agent\n\nThe agent run did not produce a result. See the workflow run: ${runUrl}\n`;
+    const body = noRunNotice(skipReason, runUrl);
     if (pr) await upsertComment(repo, pr, body);
-    return { published: 'failure-notice' };
+    return { published: 'failure-notice', skipReason: skipReason ?? null };
   }
   const run = JSON.parse(readFileSync(join(runDir, 'run.json'), 'utf8'));
   const report = readFileSync(join(runDir, 'report.md'), 'utf8');
@@ -173,6 +185,7 @@ async function main() {
     runUrl: args['run-url'] ?? '',
     baseBranch: args.base ?? 'main',
     local: args.identity === 'local',
+    skipReason: args['skip-reason'] && args['skip-reason'] !== 'true' ? args['skip-reason'] : undefined,
   });
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   if (process.env.GITHUB_STEP_SUMMARY && result.note) {
