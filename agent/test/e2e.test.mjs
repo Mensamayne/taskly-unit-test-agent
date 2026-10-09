@@ -24,7 +24,7 @@ export function countCompleted(todos: Pick<Todo, 'completed'>[]): number {
 `;
 
 const WRONG_TEST = `import { expect, it } from 'vitest';
-import { countCompleted } from '../src/features/todos/stats.ts';
+import { countCompleted } from '../src/features/todos/uta-e2e-sample.ts';
 
 it('counts completed tasks', () => {
   expect(countCompleted([{ completed: true }, { completed: false }])).toBe(2);
@@ -32,7 +32,7 @@ it('counts completed tasks', () => {
 `;
 
 const GOOD_TEST = `import { describe, expect, it } from 'vitest';
-import { countCompleted } from '../src/features/todos/stats.ts';
+import { countCompleted } from '../src/features/todos/uta-e2e-sample.ts';
 
 describe('countCompleted', () => {
   it('counts only completed tasks', () => {
@@ -76,9 +76,9 @@ before(() => {
     symlinkSync(join(REPO, side, 'node_modules'), join(WT, side, 'node_modules'), 'junction');
   }
   cpSync(join(REPO, 'backend', 'src', 'generated'), join(WT, 'backend', 'src', 'generated'), { recursive: true });
-  writeFileSync(join(WT, 'backend', 'src', 'features', 'todos', 'stats.ts'), STATS);
-  git(['add', 'backend/src/features/todos/stats.ts']);
-  git(['commit', '-qm', 'feat: count completed tasks']);
+  writeFileSync(join(WT, 'backend', 'src', 'features', 'todos', 'uta-e2e-sample.ts'), STATS);
+  git(['add', 'backend/src/features/todos/uta-e2e-sample.ts']);
+  git(['commit', '-qm', 'feat: count completed tasks (harness test fixture)']);
 });
 
 /** Remove the dependency links before anything deletes the worktree, so no tool follows them into the real node_modules. */
@@ -100,16 +100,16 @@ describe('uta end to end', { timeout: 600_000 }, () => {
     resetWorktree();
     const script = join(TMP, 'stub.json');
     writeFileSync(script, JSON.stringify({
-      'backend/src/features/todos/stats.ts': [
-        { files: { 'backend/tests/stats.test.ts': WRONG_TEST }, result: { cases: ['counts completed tasks'] } },
-        { files: { 'backend/tests/stats.test.ts': GOOD_TEST }, result: { cases: ['counts only completed tasks', 'empty list'] } },
+      'backend/src/features/todos/uta-e2e-sample.ts': [
+        { files: { 'backend/tests/uta-e2e-sample.test.ts': WRONG_TEST }, result: { cases: ['counts completed tasks'] } },
+        { files: { 'backend/tests/uta-e2e-sample.test.ts': GOOD_TEST }, result: { cases: ['counts only completed tasks', 'empty list'] } },
       ],
     }));
     const run = uta(['run', '--mode', 'pr', '--base', 'HEAD~1', '--author', 'stub', '--stub', script]);
     assert.equal(run.code, 0, run.stdout + run.stderr);
     assert.equal(run.json.outcome, 'done');
     assert.deepEqual(run.json.targets.map((t) => [t.path, t.action, t.status, t.attempts]), [
-      ['backend/src/features/todos/stats.ts', 'write', 'accepted', 2],
+      ['backend/src/features/todos/uta-e2e-sample.ts', 'write', 'accepted', 2],
     ]);
     const state = JSON.parse(readFileSync(join(WT, '.uta-runs', readFileSync(join(WT, '.uta-runs', 'latest'), 'utf8'), 'state.json'), 'utf8'));
     assert.equal(state.targets[0].history[0].gate, 'G4');
@@ -119,7 +119,7 @@ describe('uta end to end', { timeout: 600_000 }, () => {
     assert.match(report, /Tests passed/);
     assert.match(report, /attempt 1: G4 assertion/);
     const patch = readFileSync(run.json.artifacts.patch, 'utf8');
-    assert.match(patch, /\+\+\+ b\/backend\/tests\/stats\.test\.ts/);
+    assert.match(patch, /\+\+\+ b\/backend\/tests\/uta-e2e-sample\.test\.ts/);
     assert.match(patch, /returns zero for an empty list/);
   });
 
@@ -127,14 +127,14 @@ describe('uta end to end', { timeout: 600_000 }, () => {
     resetWorktree();
     const run = uta(['run', '--mode', 'pr', '--base', 'HEAD~1', '--author', 'external']);
     assert.equal(run.code, 3, run.stdout + run.stderr);
-    assert.equal(run.json.awaiting.testPath, 'backend/tests/stats.test.ts');
+    assert.equal(run.json.awaiting.testPath, 'backend/tests/uta-e2e-sample.test.ts');
 
     const packet = uta(['packet', '--target', 't1']);
     assert.match(packet.stdout, /This is the only file you may write/);
 
-    const hookDeny = uta(['hook'], { input: JSON.stringify({ tool_name: 'Write', tool_input: { file_path: join(WT, 'backend', 'src', 'features', 'todos', 'stats.ts') } }) });
+    const hookDeny = uta(['hook'], { input: JSON.stringify({ tool_name: 'Write', tool_input: { file_path: join(WT, 'backend', 'src', 'features', 'todos', 'uta-e2e-sample.ts') } }) });
     assert.equal(hookDeny.json.hookSpecificOutput.permissionDecision, 'deny');
-    const hookAllow = uta(['hook'], { input: JSON.stringify({ tool_name: 'Write', tool_input: { file_path: join(WT, 'backend', 'tests', 'stats.test.ts') } }) });
+    const hookAllow = uta(['hook'], { input: JSON.stringify({ tool_name: 'Write', tool_input: { file_path: join(WT, 'backend', 'tests', 'uta-e2e-sample.test.ts') } }) });
     assert.equal(hookAllow.stdout.trim(), '');
 
     const early = uta(['gate', '--target', 't1']);
@@ -142,8 +142,8 @@ describe('uta end to end', { timeout: 600_000 }, () => {
     assert.equal(early.json.error.code, 'illegal_transition');
 
     mkdirSync(join(WT, 'backend', 'tests'), { recursive: true });
-    writeFileSync(join(WT, 'backend', 'tests', 'stats.test.ts'), GOOD_TEST);
-    writeFileSync(join(WT, 'backend', 'src', 'features', 'todos', 'stats.ts'), STATS.replace('.length', '.length + 0'));
+    writeFileSync(join(WT, 'backend', 'tests', 'uta-e2e-sample.test.ts'), GOOD_TEST);
+    writeFileSync(join(WT, 'backend', 'src', 'features', 'todos', 'uta-e2e-sample.ts'), STATS.replace('.length', '.length + 0'));
     const resultFile = join(TMP, 'result.json');
     writeFileSync(resultFile, JSON.stringify({ cases: ['counts only completed tasks'] }));
     assert.equal(uta(['submit', '--target', 't1', '--result', resultFile]).code, 0);
@@ -152,7 +152,7 @@ describe('uta end to end', { timeout: 600_000 }, () => {
     assert.equal(gate.code, 4, gate.stdout);
     assert.equal(gate.json.outcome, 'run-failed');
     assert.equal(gate.json.gate, 'G1');
-    assert.match(gate.json.message, /backend\/src\/features\/todos\/stats\.ts/);
+    assert.match(gate.json.message, /backend\/src\/features\/todos\/uta-e2e-sample\.ts/);
     assert.equal(existsSync(join(WT, '.uta-runs', '.active')), false);
     assert.equal(uta(['status']).json.failure.code, 'scope_violation');
   });
@@ -160,7 +160,7 @@ describe('uta end to end', { timeout: 600_000 }, () => {
   it('ends the run with a report when the author fails', () => {
     resetWorktree();
     const script = join(TMP, 'stub-throw.json');
-    writeFileSync(script, JSON.stringify({ 'backend/src/features/todos/stats.ts': [{ throw: 'model API unavailable' }] }));
+    writeFileSync(script, JSON.stringify({ 'backend/src/features/todos/uta-e2e-sample.ts': [{ throw: 'model API unavailable' }] }));
     const run = uta(['run', '--mode', 'pr', '--base', 'HEAD~1', '--author', 'stub', '--stub', script]);
     assert.equal(run.code, 4, run.stdout + run.stderr);
     assert.equal(run.json.failure.code, 'author_error');
