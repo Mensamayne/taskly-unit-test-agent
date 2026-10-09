@@ -101,7 +101,7 @@ With `ANTHROPIC_API_KEY` set, `--author sdk` runs the same flow with the Claude 
 
 ## Custom agent and skills
 
-`unit-test-author` (`.claude/agents/unit-test-author.md`) writes tests for exactly one source file per session. Its tools are `Read`, `Grep`, `Glob`, `Write`, `Edit`, and three task-scoped MCP tools served in process by the harness: `get_change_context`, `run_tests` (sandboxed, budgeted), and `coverage_for_file`. It has no shell and no web access. A `PreToolUse` hook (in process for the SDK, and `.claude/settings.json` for Claude Code) denies writes outside the target's test file and reads of `.env` files. The final answer is forced into a JSON schema through structured output.
+`unit-test-author` (`.claude/agents/unit-test-author.md`) writes tests for exactly one source file per session. Its tools are `Read`, `Grep`, `Glob`, `Write`, `Edit`, and three task-scoped MCP tools served in process by the harness: `get_change_context`, `run_tests` (sandboxed, budgeted), and `coverage_for_file`. It has no shell and no web access. A `PreToolUse` hook (in process for the SDK, and `.claude/settings.json` for Claude Code) denies writes outside the target's test file and reads of `.env` files. The final answer is forced into a JSON schema through structured output. The harness reads the agent file itself and passes its prompt and tools to the SDK session (the SDK's own `agent` option dropped the Skill and structured-output tools in version 0.3.282). The agent process runs with an isolated home directory, so the user's `~/.claude` (memory, settings, plugins) never reaches the model.
 
 `test-reviewer` (`.claude/agents/test-reviewer.md`) is read-only and runs after a target is accepted. Its findings (tautologies, over-mocking, weak assertions) appear in the report as advisory notes and never block.
 
@@ -153,7 +153,7 @@ Kept on purpose, because they show the gates working:
 
 ### Who authored the tests in these runs
 
-The repository has no model key yet, so the runs above used the `external` driver, with Claude Code driving the CLI as the author. It received the same task packets, loaded the same skill files, used the same tools, and passed the same gates as the `sdk` driver. The `sdk` driver itself (`agent/src/author/sdk.mjs`) is written against the Agent SDK 0.3.282 type definitions but has not yet run against the API in this repository.
+The repository has no model key yet, so the runs above used the `external` driver, with Claude Code driving the CLI as the author. It received the same task packets, loaded the same skill files, used the same tools, and passed the same gates as the `sdk` driver. The `sdk` driver has not run against the real model in this repository. It is verified end to end against a scripted stand-in for the Messages API (`agent/test/sdk.e2e.test.mjs`): the real Agent SDK and Claude Code process load the agent prompt and the skills, call the MCP tools, are stopped by the write hook, return structured output, and resume the same session for a repair. That test found three wiring bugs that would have shown up only with a key.
 
 ## Edge cases
 
@@ -171,7 +171,7 @@ After the example runs, the harness was attacked from the author's side on a scr
 | Flaky test (`Math.random`) resubmitted until it passes | Was **accepted** on the third try. Now G2 rejects unstubbed randomness, and a resubmitted file that already failed is rejected without running (G0) | fixed |
 | Repair that fails exactly like the previous attempt | Used to spend the next repair. Now stops the target early (no progress) | fixed |
 | Test hangs on a promise | Reported as "STACK_TRACE_ERROR", class runtime. Now class `timeout` with an actionable message | fixed |
-| Synchronous infinite loop | Command timeout; the whole process tree is killed (process group on Linux, `taskkill /T` on Windows) and a container is stopped by name | fixed (Docker path not exercised locally) |
+| Synchronous infinite loop | Command timeout; the whole process tree is killed (process group on Linux, `taskkill /T` on Windows) and a container is stopped by name | fixed; the container path is tested in CI (`agent/test/docker.e2e.test.mjs`) |
 | Vitest or `tsc` cannot run at all | Was charged to the author as a test failure. Now class `infra`: retried once, then "not verified", never a repair | fixed |
 | Author claims a defect for a failure it caused | Claims must name a test that failed on an assertion; the report labels them as unverified | partly fixed (a correctly named but wrong claim still reaches the report, labeled) |
 | Two sources with the same file name (flat backend tests) | Second one is a `noop` instead of two authors overwriting one file | fixed |
@@ -202,7 +202,7 @@ How the reviewed projects handle the same problems, read from their code:
 
 ## Limitations
 
-- The `sdk` driver and the Docker sandbox have not been exercised end to end here (no model key). The harness tests cover the pipeline with the `stub` and `external` drivers on real Vitest and `tsc`.
+- No run with the real model yet (no key in this repository). The `sdk` driver is tested against a scripted Messages API, so the wiring is verified, not the quality of tests a model writes; the `external` runs show the quality bar the gates enforce. The Docker sandbox is tested in CI on Linux; it does not run on a Windows host with Windows `node_modules`.
 - Commits pushed with `GITHUB_TOKEN` do not trigger other workflows, so CI does not rerun on the agent's commit. The publisher sets a commit status from the verified run instead.
 - Coverage is a proxy for value. A changed line that existing tests execute is a `noop` even if no test asserts the new behavior (in PR #3 the cache invalidation added to the mutation hooks is executed but not asserted).
 - Static checks are regular expressions: fast and conservative, not a parser. Randomness is detected for `Math.random` and `randomUUID` only.
