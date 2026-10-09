@@ -42,7 +42,7 @@ preflight -> diff -> baseline (suites, coverage, tsc) -> plan
 Prerequisites:
 
 1. Repository secret `ANTHROPIC_API_KEY` (without it the author job skips generation; the publish job still posts a sticky PR comment explaining the skip).
-2. Optional secret `UNIT_TEST_AGENT_PUSH_TOKEN`: a fine-grained token for this repository with Contents and Pull requests set to "Read and write". The publish job checks it with a dry-run push and falls back to `GITHUB_TOKEN` with a warning if it cannot write, so a wrong token never loses the tests. The agent's commit is pushed with it so CI runs on that commit (runs started by a `GITHUB_TOKEN` push do not execute: GitHub either skips them or holds them as "action required"). The agent's own commit is recognized by its message and does not start another agent run.
+2. Optional secret `UNIT_TEST_AGENT_PUSH_TOKEN`: a fine-grained token for this repository with Contents and Pull requests set to "Read and write". The publish job checks it with a dry-run push and falls back to `GITHUB_TOKEN` with a warning if it cannot write, so a wrong token never loses the tests. The agent's commit is pushed with it so CI runs on that commit (runs started by a `GITHUB_TOKEN` push do not execute: GitHub either skips them or holds them as "action required"). The agent's own commit is recognized by its message and does not start another agent run. In this repository the token is configured and passes the write check, so CI (backend, frontend, harness) runs on every commit the agent pushes.
 3. Settings, Actions, General: allow GitHub Actions to create pull requests (bootstrap mode).
 4. Optional variables: `TEST_AGENT_MODE` (`commit` default, or `comment`), `TEST_AGENT_MODEL`.
 5. GitHub-hosted `ubuntu-latest` runners (Docker preinstalled).
