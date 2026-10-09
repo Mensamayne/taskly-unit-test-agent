@@ -1,5 +1,6 @@
 import { CheckCheck, Plus } from 'lucide-react'
 import { Button, Heading, Text } from '../../../design-system'
+import { clearCompletedLabel } from '../utils/todos'
 
 export function TodosHeader({
   disabled,
@@ -25,7 +26,7 @@ export function TodosHeader({
           onClick={onClearCompleted}
         >
           <CheckCheck size={18} aria-hidden="true" />
-          Clear completed ({completedCount})
+          {clearCompletedLabel(completedCount)}
         </Button>
         <Button disabled={disabled} onClick={onCreate}>
           <Plus size={18} aria-hidden="true" />

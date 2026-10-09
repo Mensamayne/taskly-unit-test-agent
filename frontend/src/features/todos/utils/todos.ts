@@ -82,3 +82,7 @@ export function formatDate(date: string): string {
     year: 'numeric',
   }).format(new Date(`${date}T12:00:00`))
 }
+
+export function clearCompletedLabel(count: number) {
+  return count === 0 ? 'Clear completed' : `Clear completed (${count})`
+}
