@@ -53,7 +53,7 @@ Recorded from every request the Agent SDK and Claude Code process sent to a scri
 | Hook refusals | Writes outside the test file, reads of `.env` and `.uta-runs`, paths outside the workspace and the skills |
 | Repair | The resumed session keeps the conversation and gets a new packet with the gate feedback and a fresh tool budget |
 
-Nothing from the user's home directory, `.cursor/`, local notes, or credentials appears in any request. The recording found two problems, both fixed: skill reference files were refused by the hook (the skills live in the trusted checkout, outside the workspace), and the reviewer session had no read guard.
+Nothing from the user's home directory, editor settings, local notes, or credentials appears in any request. The recording found two problems, both fixed: skill reference files were refused by the hook (the skills live in the trusted checkout, outside the workspace), and the reviewer session had no read guard.
 
 ## Runs that failed during development
 

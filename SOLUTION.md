@@ -95,7 +95,7 @@ Seven files were `noop` with a reason each. Final verification: backend 92 and f
 
 [PR #2](https://github.com/Mensamayne/taskly-unit-test-agent/pull/2) is a bootstrap run: 20 of 20 targets accepted; its body is the agent's report.
 
-PR #2 and PR #3 used the `external` driver with Claude Code as the author, before the repository had a model key: same packets, skills, tools, and gates as the `sdk` driver. The `sdk` driver is verified end to end against a scripted Messages API (`agent/test/sdk.e2e.test.mjs`), which found three wiring problems described in [`docs/edge-cases.md`](docs/edge-cases.md).
+PR #2 and PR #3 used the `external` driver with a coding agent driving the CLI as the author, before the repository had a model key: same packets, skills, tools, and gates as the `sdk` driver. The `sdk` driver is verified end to end against a scripted Messages API (`agent/test/sdk.e2e.test.mjs`), which found three wiring problems described in [`docs/edge-cases.md`](docs/edge-cases.md).
 
 ## Assumptions
 

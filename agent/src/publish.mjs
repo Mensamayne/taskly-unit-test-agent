@@ -156,8 +156,8 @@ export async function publish({ runDir, mode, repo, pr, workspace, runUrl, baseB
         const url = (await gh(['pr', 'create', '--repo', repo, '--base', baseBranch, '--head', branch, '--title', 'test: raise unit test coverage (unit-test agent bootstrap)', '--body-file', '-'], { input: `${report}\nWorkflow run: ${runUrl}\n`, token: process.env.PUSH_TOKEN || undefined })).trim();
         note = `Opened ${url}.`;
       }
-      // Record what the author job verified. CI also runs on the new commit when it was pushed with
-      // UNIT_TEST_AGENT_PUSH_TOKEN; a GITHUB_TOKEN push gets no CI that runs by itself, and then this status is all the commit has.
+      // Record what the author job verified. With UNIT_TEST_AGENT_PUSH_TOKEN, CI also runs on the
+      // new commit; after a GITHUB_TOKEN push this status is the only check the commit gets.
       await gh(['api', '-X', 'POST', `repos/${repo}/statuses/${commitSha}`, '--input', '-'], {
         input: JSON.stringify({
           state: 'success',
