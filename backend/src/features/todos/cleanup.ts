@@ -1,6 +1,6 @@
 import type { Todo } from './types.js';
 
-/** IDs of completed tasks, oldest first, so a partial failure removes the oldest ones. */
+/** IDs of completed tasks in ascending order. */
 export function completedIds(todos: Todo[]): number[] {
   return todos
     .filter((todo) => todo.completed)

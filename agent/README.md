@@ -13,7 +13,7 @@ preflight -> collect diff -> baseline (suites, coverage, tsc) -> plan
 | Driver | Use |
 |--------|-----|
 | `sdk` | Claude Agent SDK session per target with the custom agent `.claude/agents/unit-test-author.md` and the skills in `.claude/skills/`. Repairs resume the same session. Default in CI. Needs `ANTHROPIC_API_KEY` (`ANTHROPIC_BASE_URL` is forwarded for gateways). The agent process gets an isolated home directory. |
-| `external` | The run stops at every target and hands the task packet to whoever runs the CLI (a person, Cursor, Claude Code). Refused when `CI=true`. |
+| `external` | The run stops at every target and hands the task packet to whoever runs the CLI (a person or another coding agent). Refused when `CI=true`. |
 | `stub` | Replays recorded author output from a JSON script. Used by the harness tests. |
 
 After a target is accepted, the `sdk` driver asks the read-only `test-reviewer` agent for advisory findings (shown in the report, never blocking). The reviewer is given only the tests added in the run (plus existing ones the author reports changing), and findings about other tests are dropped.

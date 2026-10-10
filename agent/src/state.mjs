@@ -5,7 +5,7 @@ import { HarnessError } from './lib/errors.mjs';
 /**
  * Run directory and checkpoint. Every CLI command loads state.json, checks that the
  * requested transition is legal, mutates, and saves atomically. This is what lets an
- * external driver (a person, Cursor, Claude Code) run the flow step by step under the
+ * external driver (a person or another coding agent) run the flow step by step under the
  * same rules as the SDK driver.
  *
  * Target lifecycle: pending -> authoring -> submitted -> accepted | rejected
